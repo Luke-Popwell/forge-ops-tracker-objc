@@ -1,0 +1,3 @@
+# Build output from `make test` -- regenerated locally, not something CI or other developers
+# need committed, same reasoning as every other SDK's own .gitignore in this repo.
+build/
