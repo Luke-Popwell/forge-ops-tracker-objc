@@ -1,0 +1,92 @@
+#import "FOTReporter.h"
+#import "FOTClient.h"
+#import "FOTCrashStore.h"
+#import "FOTEventBuilder.h"
+#import "FOTSignalHandler.h"
+
+@interface FOTReporter ()
+- (nullable NSDictionary<NSString *, id> *)completeSignalPayload:(nullable NSDictionary<NSString *, id> *)parsed;
+@end
+
+@implementation FOTReporter {
+    FOTConfiguration *_configuration;
+    FOTEventBuilder *_eventBuilder;
+    FOTCrashStore *_crashStore;
+    FOTClient *_client;
+}
+
+- (instancetype)initWithConfiguration:(FOTConfiguration *)configuration {
+    self = [super init];
+    if (self) {
+        _configuration = configuration;
+        _eventBuilder = [[FOTEventBuilder alloc] initWithConfiguration:configuration];
+        _crashStore = [[FOTCrashStore alloc] initWithConfiguration:configuration];
+        _client = [[FOTClient alloc] initWithConfiguration:configuration];
+    }
+    return self;
+}
+
+- (void)reportException:(NSException *)exception context:(NSDictionary<NSString *, id> *)context {
+    @try {
+        if (![_configuration isEnabled]) {
+            return;
+        }
+        NSDictionary<NSString *, id> *payload = [_eventBuilder buildEventForException:exception context:context];
+        [_crashStore writePayload:payload];
+    } @catch (NSException *reportingFailure) {
+        // Deliberately swallowed: an error reporter that itself throws while reporting a crash is
+        // the worst possible failure mode, same invariant every other SDK in this repo holds to.
+        NSLog(@"[forge-ops-tracker] reportException: failed: %@", reportingFailure);
+    }
+}
+
+- (void)uploadPendingReports {
+    @try {
+        if (![_configuration isEnabled]) {
+            return;
+        }
+        for (NSURL *url in [_crashStore pendingPayloadURLs]) {
+            NSDictionary<NSString *, id> *payload;
+            if ([url.pathExtension isEqualToString:@"txt"]) {
+                // A raw signal-crash report -- fill in the standard fields FOTSignalHandler
+                // couldn't safely build inline (see its own class comment), now that it's safe to
+                // use Foundation freely again.
+                NSDictionary<NSString *, id> *parsed = [FOTSignalHandler parseRawSignalReportAtURL:url];
+                payload = [self completeSignalPayload:parsed];
+            } else {
+                payload = [_crashStore payloadAtURL:url];
+            }
+
+            if (payload == nil) {
+                // Unreadable/corrupt file -- delete rather than retry forever.
+                [_crashStore deletePayloadAtURL:url];
+                continue;
+            }
+            if ([_client deliver:payload]) {
+                [_crashStore deletePayloadAtURL:url];
+            }
+            // On failure, leave it in place; the next launch's uploadPendingReports retries it.
+        }
+    } @catch (NSException *uploadFailure) {
+        NSLog(@"[forge-ops-tracker] uploadPendingReports failed: %@", uploadFailure);
+    }
+}
+
+- (nullable NSDictionary<NSString *, id> *)completeSignalPayload:(NSDictionary<NSString *, id> *)parsed {
+    if (parsed == nil) {
+        return nil;
+    }
+    NSISO8601DateFormatter *formatter = [[NSISO8601DateFormatter alloc] init];
+    formatter.formatOptions = NSISO8601DateFormatWithInternetDateTime;
+
+    NSMutableDictionary<NSString *, id> *payload = [parsed mutableCopy];
+    payload[@"occurred_at"] = [formatter stringFromDate:[NSDate date]]; // upload time, not crash time -- the raw file has no safely-capturable timestamp of its own beyond its filename
+    payload[@"environment"] = _configuration.environment;
+    payload[@"release"] = _configuration.releaseVersion ?: [NSNull null];
+    payload[@"server_name"] = _configuration.serverName ?: [NSNull null];
+    payload[@"context"] = @{};
+    payload[@"tags"] = @{};
+    return payload;
+}
+
+@end
