@@ -37,6 +37,7 @@
     XCTAssertEqualObjects(payload[@"server_name"], @"web-1");
     XCTAssertEqualObjects(payload[@"context"], @{ @"url": @"https://example.com" });
     XCTAssertTrue([payload[@"occurred_at"] isKindOfClass:[NSString class]]);
+    XCTAssertEqualObjects(payload[@"sdk_name"], @"objc");
 }
 
 - (void)testParsesRealStackFramesWithImageAndSymbol {
@@ -47,7 +48,7 @@
 
     XCTAssertGreaterThanOrEqual(frames.count, (NSUInteger)1);
     NSDictionary *frame = frames.firstObject;
-    XCTAssertTrue([frame[@"file"] isKindOfClass:[NSString class]]); // the binary image name -- see FOTEventBuilder.h
+    XCTAssertTrue([frame[@"file"] isKindOfClass:[NSString class]]); // the binary image name: see FOTEventBuilder.h
     XCTAssertEqualObjects(frame[@"line"], [NSNull null]); // no line-level info at runtime, documented in FOTEventBuilder.h
     XCTAssertTrue([frame[@"method"] isKindOfClass:[NSString class]]);
 }
@@ -91,6 +92,27 @@
     XCTAssertEqualObjects(payload[@"context"], @{ @"email": @"ada@example.com" });
 }
 
+- (void)testIncludesTheUserWhenGivenOneNeverScrubbedEvenThoughItsAnEmail {
+    FOTEventBuilder *builder = [[FOTEventBuilder alloc] initWithConfiguration:[self newConfiguration]];
+    NSException *exception = [self raiseAndCatch];
+
+    NSDictionary *payload = [builder buildEventForException:exception
+                                                       context:nil
+                                                          user:@{ @"id": @42, @"email": @"ada@example.com" }];
+
+    NSDictionary *user = payload[@"user"];
+    XCTAssertEqualObjects(user[@"email"], @"ada@example.com");
+}
+
+- (void)testOmitsTheUserKeyEntirelyWhenNoneWasGiven {
+    FOTEventBuilder *builder = [[FOTEventBuilder alloc] initWithConfiguration:[self newConfiguration]];
+    NSException *exception = [self raiseAndCatch];
+
+    NSDictionary *payload = [builder buildEventForException:exception context:nil user:nil];
+
+    XCTAssertNil(payload[@"user"]);
+}
+
 - (void)testNeverAttachesSourceContextRegardlessOfConfiguration {
     // captureSourceContext defaults to YES (see FOTConfigurationTests), but a frame here never
     // carries a real file+line pair to key a disk read off of (-callStackSymbols only ever gives an
@@ -110,6 +132,38 @@
             XCTAssertNil(frame[@"post_context"]);
         }
     }
+}
+
+- (void)testIncludesBreadcrumbsWhenGiven {
+    FOTEventBuilder *builder = [[FOTEventBuilder alloc] initWithConfiguration:[[FOTConfiguration alloc] init]];
+    NSException *exception = [NSException exceptionWithName:@"FOTTestException" reason:@"boom" userInfo:nil];
+    NSArray *crumbs = @[ @{ @"category": @"controller", @"message": @"GET /orders/42", @"level": @"info", @"timestamp": @"2024-01-15T10:29:58Z", @"data": @{} } ];
+
+    NSDictionary *payload = [builder buildEventForException:exception context:nil user:nil breadcrumbs:crumbs];
+
+    XCTAssertEqualObjects(payload[@"breadcrumbs"], crumbs);
+}
+
+- (void)testOmitsTheBreadcrumbsKeyEntirelyWhenNoneWereGivenOrTheListIsEmpty {
+    FOTEventBuilder *builder = [[FOTEventBuilder alloc] initWithConfiguration:[[FOTConfiguration alloc] init]];
+    NSException *exception = [NSException exceptionWithName:@"FOTTestException" reason:@"boom" userInfo:nil];
+
+    XCTAssertNil([builder buildEventForException:exception context:nil][@"breadcrumbs"]);
+    XCTAssertNil([builder buildEventForException:exception context:nil user:nil breadcrumbs:@[]][@"breadcrumbs"]);
+}
+
+- (void)testScrubsLikelyPiiOutOfABreadcrumbMessageAndData {
+    FOTEventBuilder *builder = [[FOTEventBuilder alloc] initWithConfiguration:[[FOTConfiguration alloc] init]];
+    NSException *exception = [NSException exceptionWithName:@"FOTTestException" reason:@"boom" userInfo:nil];
+    NSArray *crumbs = @[ @{ @"category": @"custom", @"message": @"emailed alice@example.com", @"level": @"info", @"timestamp": @"2024-01-15T10:29:58Z", @"data": @{ @"password": @"hunter2" } } ];
+
+    NSDictionary *payload = [builder buildEventForException:exception context:nil user:nil breadcrumbs:crumbs];
+
+    NSDictionary *crumb = payload[@"breadcrumbs"][0];
+    XCTAssertEqualObjects(crumb[@"message"], @"emailed [EMAIL FILTERED]");
+    XCTAssertEqualObjects(crumb[@"data"][@"password"], @"[FILTERED]");
+    XCTAssertEqualObjects(crumb[@"category"], @"custom");
+    XCTAssertEqualObjects(crumb[@"timestamp"], @"2024-01-15T10:29:58Z");
 }
 
 @end

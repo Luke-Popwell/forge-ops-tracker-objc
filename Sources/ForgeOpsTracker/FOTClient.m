@@ -17,7 +17,26 @@
 }
 
 - (BOOL)deliver:(NSDictionary<NSString *, id> *)payload {
-    NSURL *url = [_configuration ingestionURL];
+    return [self postJSONObject:payload toURL:[_configuration ingestionURL]];
+}
+
+- (BOOL)deliverPerformanceSamples:(NSArray<NSDictionary<NSString *, id> *> *)samples {
+    return [self postJSONObject:@{ @"samples": samples } toURL:[_configuration performanceSamplesURL]];
+}
+
+- (BOOL)deliverMetrics:(NSArray<NSDictionary<NSString *, id> *> *)entries {
+    return [self postJSONObject:@{ @"metrics": entries } toURL:[_configuration customMetricsURL]];
+}
+
+- (BOOL)deliverInfrastructureMetrics:(NSArray<NSDictionary<NSString *, id> *> *)entries {
+    return [self postJSONObject:@{ @"metrics": entries } toURL:[_configuration infrastructureMetricsURL]];
+}
+
+- (BOOL)deliverSpans:(NSDictionary<NSString *, id> *)trace {
+    return [self postJSONObject:trace toURL:[_configuration spansURL]];
+}
+
+- (BOOL)postJSONObject:(id)payload toURL:(nullable NSURL *)url {
     NSString *apiKey = [_configuration apiKey];
     if (url == nil || apiKey == nil) {
         return NO;

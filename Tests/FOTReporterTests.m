@@ -54,6 +54,20 @@
     XCTAssertEqual([store pendingPayloadURLs].count, (NSUInteger)0);
 }
 
+- (void)testReportExceptionIncludesTheGivenUserNeverScrubbedEvenThoughItsAnEmail {
+    FOTConfiguration *config = [self enabledConfiguration];
+    FOTReporter *reporter = [[FOTReporter alloc] initWithConfiguration:config];
+
+    [reporter reportException:[NSException exceptionWithName:@"FOTTestException" reason:@"boom" userInfo:nil]
+                       context:nil
+                          user:@{ @"id": @42, @"email": @"alice@example.com" }];
+    [reporter uploadPendingReports];
+
+    NSArray *requests = self.server.requests;
+    XCTAssertEqual(requests.count, (NSUInteger)1);
+    XCTAssertTrue([requests[0][@"body"] containsString:@"alice@example.com"]);
+}
+
 - (void)testUploadPendingReportsDeliversAndDeletesOnSuccess {
     FOTConfiguration *config = [self enabledConfiguration];
     FOTReporter *reporter = [[FOTReporter alloc] initWithConfiguration:config];

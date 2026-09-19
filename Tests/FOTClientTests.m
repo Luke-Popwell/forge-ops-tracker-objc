@@ -13,7 +13,7 @@
     self.server = [[FOTTestHTTPServer alloc] init];
     [self.server start];
     // The accept loop runs on its own thread and starts polling immediately, but give it a brief
-    // moment to actually be listening before the first request -- real, observed flakiness
+    // moment to actually be listening before the first request: real, observed flakiness
     // without this, not a hypothetical.
     [NSThread sleepForTimeInterval:0.05];
 }

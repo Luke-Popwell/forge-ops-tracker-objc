@@ -44,7 +44,7 @@
         return @[];
     }
 
-    // Both extensions -- "json" is a full event payload written by FOTReporter after an uncaught
+    // Both extensions: "json" is a full event payload written by FOTReporter after an uncaught
     // NSException; "txt" is a raw signal-crash report written by FOTSignalHandler (see its own
     // class comment for why that path can't safely build JSON inline). FOTReporter's
     // -uploadPendingReports branches on which one it's looking at.

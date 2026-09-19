@@ -9,14 +9,14 @@ static const int FOTFatalSignals[] = { SIGABRT, SIGILL, SIGSEGV, SIGFPE, SIGBUS,
 static const size_t FOTFatalSignalCount = sizeof(FOTFatalSignals) / sizeof(FOTFatalSignals[0]);
 
 // Prepared once, at installation time, so the handler itself never allocates or calls into
-// Objective-C -- see FOTSignalHandler.h's class comment for why that matters here.
+// Objective-C: see FOTSignalHandler.h's class comment for why that matters here.
 static char FOTCrashDirectory[PATH_MAX];
 
 static void FOTHandleFatalSignal(int signalNumber) {
     char path[PATH_MAX];
     // snprintf and time() aren't on POSIX's strict async-signal-safe list, but both are widely
     // relied on in practice by real-world signal handlers (this repo takes the same pragmatic
-    // stance rather than hand-rolling an integer-to-string formatter) -- documented here as a
+    // stance rather than hand-rolling an integer-to-string formatter): documented here as a
     // deliberate, informed tradeoff, not an oversight.
     snprintf(path, sizeof(path), "%s/signal-%d-%ld.txt", FOTCrashDirectory, signalNumber, (long)time(NULL));
 
@@ -31,14 +31,14 @@ static void FOTHandleFatalSignal(int signalNumber) {
         void *frames[64];
         int frameCount = backtrace(frames, 64);
         // backtrace_symbols_fd(), unlike backtrace_symbols(), writes directly to a file
-        // descriptor without allocating a string array first -- specifically documented by both
+        // descriptor without allocating a string array first: specifically documented by both
         // glibc and Darwin's own libc as the signal-safer of the two for exactly this reason.
         backtrace_symbols_fd(frames, frameCount, fd);
 
         close(fd);
     }
 
-    // Restore the default disposition and re-raise, rather than swallowing the signal -- the
+    // Restore the default disposition and re-raise, rather than swallowing the signal: the
     // process should still actually crash (and produce a real OS-level core dump/crash log) the
     // same way it would without this handler installed, same "rethrow, don't swallow" invariant
     // every other framework integration in this repo holds to.
@@ -85,7 +85,7 @@ static void FOTHandleFatalSignal(int signalNumber) {
             @"file": [NSNull null],
             @"line": [NSNull null],
             @"method": line,
-            @"in_app": @NO, // signal-handler frames aren't classified -- see the class comment
+            @"in_app": @NO, // signal-handler frames aren't classified: see the class comment
         }];
     }
 

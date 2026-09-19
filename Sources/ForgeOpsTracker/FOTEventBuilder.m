@@ -5,13 +5,18 @@ static const NSUInteger FOTMaxFrames = 500;
 
 // Would be the source-context window size and per-line truncation length (see other SDKs' own
 // EventBuilder for the real version of this), if a frame here ever carried a real file+line pair
-// to key a disk read off of. It doesn't -- see FOTEventBuilder.h's own header comment -- so these
+// to key a disk read off of. It doesn't (see FOTEventBuilder.h's own header comment) so these
 // exist unused here purely as a documented placeholder, named consistently with FOTMaxFrames
 // above, rather than silently having no trace of the concept at all.
 __attribute__((unused)) static const NSUInteger FOTContextLines = 5;
 __attribute__((unused)) static const NSUInteger FOTMaxContextLineLength = 500;
 
-// e.g. "12  MyApp    0x0000000100abcd12 -[MyClass myMethod] + 82" -- frame index, image name,
+// Identifies this client to the server's auto language-detection on the project the event lands
+// in (see Project#note_sdk_platform server-side); matches this repo's own sdks/objc directory
+// name, the same convention every other language's client follows.
+static NSString *const FOTSdkName = @"objc";
+
+// e.g. "12  MyApp    0x0000000100abcd12 -[MyClass myMethod] + 82": frame index, image name,
 // address, symbol, "+ offset". Verified directly against real -callStackSymbols output from a
 // real raised-and-caught NSException before relying on this shape, not assumed from Apple's own
 // (informal, undocumented) format alone.
@@ -40,6 +45,19 @@ static NSRegularExpression *FOTFrameRegex(void) {
 
 - (NSDictionary<NSString *, id> *)buildEventForException:(NSException *)exception
                                                    context:(NSDictionary<NSString *, id> *)context {
+    return [self buildEventForException:exception context:context user:nil];
+}
+
+- (NSDictionary<NSString *, id> *)buildEventForException:(NSException *)exception
+                                                   context:(NSDictionary<NSString *, id> *)context
+                                                      user:(NSDictionary<NSString *, id> *)user {
+    return [self buildEventForException:exception context:context user:user breadcrumbs:nil];
+}
+
+- (NSDictionary<NSString *, id> *)buildEventForException:(NSException *)exception
+                                                   context:(NSDictionary<NSString *, id> *)context
+                                                      user:(NSDictionary<NSString *, id> *)user
+                                               breadcrumbs:(NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs {
     NSISO8601DateFormatter *formatter = [[NSISO8601DateFormatter alloc] init];
     formatter.formatOptions = NSISO8601DateFormatWithInternetDateTime; // no fractional seconds, matches every other SDK's payload
 
@@ -53,8 +71,20 @@ static NSRegularExpression *FOTFrameRegex(void) {
     payload[@"server_name"] = _configuration.serverName ?: [NSNull null];
     payload[@"context"] = context ?: @{};
     payload[@"tags"] = @{};
+    payload[@"sdk_name"] = FOTSdkName;
+    if (breadcrumbs.count > 0) {
+        payload[@"breadcrumbs"] = breadcrumbs;
+    }
 
-    return _configuration.scrubPII ? [FOTPiiScrubber scrub:payload key:nil] : payload;
+    NSDictionary<NSString *, id> *scrubbed = _configuration.scrubPII ? [FOTPiiScrubber scrub:payload key:nil] : payload;
+
+    // Merged in after scrubbing, never before: see this method's own header comment on why.
+    if (user.count > 0) {
+        NSMutableDictionary<NSString *, id> *withUser = [scrubbed mutableCopy];
+        withUser[@"user"] = user;
+        return withUser;
+    }
+    return scrubbed;
 }
 
 - (NSArray<NSDictionary<NSString *, id> *> *)backtraceForException:(NSException *)exception {
@@ -67,7 +97,7 @@ static NSRegularExpression *FOTFrameRegex(void) {
         }
         NSTextCheckingResult *match = [regex firstMatchInString:line options:0 range:NSMakeRange(0, line.length)];
         if (match == nil) {
-            continue; // an unparseable line is skipped, not an error -- see PHP's own client for the same philosophy
+            continue; // an unparseable line is skipped, not an error: see PHP's own client for the same philosophy
         }
 
         NSString *image = [line substringWithRange:[match rangeAtIndex:1]];
@@ -75,7 +105,7 @@ static NSRegularExpression *FOTFrameRegex(void) {
 
         NSDictionary<NSString *, id> *frame = @{
             @"file": image,
-            @"line": [NSNull null], // no line-level info at runtime -- see FOTEventBuilder.h's own header comment
+            @"line": [NSNull null], // no line-level info at runtime: see FOTEventBuilder.h's own header comment
             @"method": symbol,
             @"in_app": @([self isInAppImage:image]),
         };
@@ -93,11 +123,11 @@ static NSRegularExpression *FOTFrameRegex(void) {
     return [image isEqualToString:executableName];
 }
 
-// Deliberately a no-op -- see FOTEventBuilder.h's own header comment. The gating logic every other
+// Deliberately a no-op: see FOTEventBuilder.h's own header comment. The gating logic every other
 // SDK applies here is: the config option is on, AND the frame is in-app, AND a real file path +
 // line number is actually available. The third condition can never be true on this SDK's own
-// capture path -- callStackSymbols gives a binary image name and a resolved symbol, never a source
-// file or a line number (frame[@"line"] above is always [NSNull null]) -- so there is nothing
+// capture path: callStackSymbols gives a binary image name and a resolved symbol, never a source
+// file or a line number (frame[@"line"] above is always [NSNull null]): so there is nothing
 // _configuration.captureSourceContext could ever gate here even though it exists (see
 // FOTConfiguration.h's own comment) for API-shape consistency with every other SDK. No disk read is
 // ever attempted, regardless of what that flag is set to.

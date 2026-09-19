@@ -1,4 +1,4 @@
-# Builds this SDK's sources and tests into a plain .xctest bundle via clang directly -- no
+# Builds this SDK's sources and tests into a plain .xctest bundle via clang directly: no
 # .xcodeproj/xcworkspace needed. See README.md's "Running the tests" section for why: this is a
 # library meant to be dropped into a host app's own Xcode project (via SwiftPM/CocoaPods/manual
 # file references, README.md covers all three), not an app itself, so there's no app target to

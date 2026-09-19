@@ -4,7 +4,7 @@
 NS_ASSUME_NONNULL_BEGIN
 
 /**
- * Persists crash event payloads to disk and reads them back -- the "queue" for this SDK, in the
+ * Persists crash event payloads to disk and reads them back: the "queue" for this SDK, in the
  * sense every other SDK's DeliveryQueue is its own queue, except this one survives the process
  * dying (which, for a crash reporter, is the one guarantee that actually matters: the app is
  * about to terminate, possibly abnormally, so anything not already durably written before that

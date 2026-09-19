@@ -20,7 +20,7 @@ static NSArray<NSString *> *FOTSensitiveKeys(void) {
 
 // label -> compiled NSRegularExpression, built once. NSRegularExpression uses ICU regex syntax,
 // which accepts every one of these 8 patterns unmodified from app/services/pii_scrubber.rb's own
-// Ruby syntax -- verified directly against real matching input for each (see FOTPiiScrubberTests),
+// Ruby syntax: verified directly against real matching input for each (see FOTPiiScrubberTests),
 // not assumed to translate cleanly just because the syntax looks the same.
 static NSArray<NSArray *> *FOTPatterns(void) {
     static NSArray<NSArray *> *patterns;
@@ -28,7 +28,7 @@ static NSArray<NSArray *> *FOTPatterns(void) {
     dispatch_once(&onceToken, ^{
         NSMutableArray<NSArray *> *built = [NSMutableArray array];
 
-        // error is declared fresh inside this inner block, not captured from the outer one --
+        // error is declared fresh inside this inner block, not captured from the outer one:
         // taking &error on a variable a block captures by value (not marked __block) doesn't
         // give ARC the ownership qualifier an NSError** out-parameter needs, confirmed directly
         // as a real build error, not a hypothetical.
@@ -92,7 +92,7 @@ static NSArray<NSArray *> *FOTPatterns(void) {
         NSString *label = pair[0];
         NSRegularExpression *regex = pair[1];
         NSString *replacement = [NSString stringWithFormat:@"[%@ FILTERED]", label];
-        // NSRegularExpression's replacement templates treat "$" specially -- escape any literal
+        // NSRegularExpression's replacement templates treat "$" specially: escape any literal
         // "$" in the label (none of the 8 labels here contain one, but this is future-proofing,
         // not something this specific input could ever actually need).
         NSString *template = [NSRegularExpression escapedTemplateForString:replacement];

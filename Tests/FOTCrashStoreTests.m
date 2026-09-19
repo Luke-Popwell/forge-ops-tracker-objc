@@ -24,7 +24,7 @@
 
 - (void)testWritesAndReadsBackAPayload {
     FOTCrashStore *store = [self newStore];
-    // Built as a local first, not passed as @{ ...multiple keys... } directly to XCTAssertTrue --
+    // Built as a local first, not passed as @{ ...multiple keys... } directly to XCTAssertTrue:
     // confirmed directly (not assumed): the C preprocessor only tracks parenthesis nesting when
     // splitting a macro call's arguments, not brace nesting, so a multi-key dictionary literal's
     // own internal commas get misread as separating macro arguments when it isn't itself wrapped

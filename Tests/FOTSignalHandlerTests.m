@@ -8,9 +8,9 @@
 @implementation FOTSignalHandlerTests
 
 // Actually raising SIGABRT/SIGSEGV/etc. to test the handler's own body would crash this test
-// process -- the same reason every real crash reporter's signal path is validated by manual
+// process: the same reason every real crash reporter's signal path is validated by manual
 // crash testing, not a unit test (see FOTSignalHandler.h's own class comment). What's tested here
-// instead: that installation itself succeeds and genuinely registers a handler via sigaction --
+// instead: that installation itself succeeds and genuinely registers a handler via sigaction,
 // confirmed directly by reading the disposition back, not just asserting no exception was thrown.
 - (void)testInstallingRegistersARealHandlerForFatalSignals {
     NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSUUID UUID].UUIDString];

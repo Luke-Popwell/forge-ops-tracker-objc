@@ -4,7 +4,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 /**
  * A real local HTTP server for FOTClient tests to POST against, in the same spirit as
- * sdks/php/tests/fixtures/echo_server.php -- built on plain BSD sockets (accept/read/write) on a
+ * sdks/php/tests/fixtures/echo_server.php: built on plain BSD sockets (accept/read/write) on a
  * background thread within the test process itself, since that's cheap and needs no extra
  * tooling beyond what's already linked (Foundation + libc). Every accepted request is parsed
  * (method, path, headers, body) and recorded for the test to assert against; responds 401 for
