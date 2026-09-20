@@ -1,6 +1,6 @@
 # ForgeOpsTracker (Objective-C)
 
-Objective-C crash reporting client for a [ForgeOps](../../) instance. Real-world Objective-C
+Objective-C crash reporting client for [ForgeOps](https://getforgeops.net). Real-world Objective-C
 today is overwhelmingly iOS/macOS app code, not a web backend, so there's no server-side
 request-exception path for this SDK to hook into. This SDK is instead a
 genuine **crash reporter**: it captures what would otherwise crash the app (an uncaught
