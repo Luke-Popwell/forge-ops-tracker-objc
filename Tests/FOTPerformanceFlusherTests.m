@@ -155,6 +155,59 @@
     XCTAssertEqualObjects([flusher tallyForTransaction:@"GET /new"][@"count"], @1);
 }
 
+- (void)testDeliversALatencyHistogramPerBucketAlongsideCountSumAndMax {
+    FOTPerformanceFlusher *flusher = [self flusherForConfiguration:[self configurationWithPath:@"/api/v1/events"]];
+    for (NSNumber *duration in @[@10, @40, @120, @700, @12000]) {
+        [flusher recordTransaction:@"GET /posts" durationMs:duration.doubleValue];
+    }
+
+    [flusher flush];
+
+    NSDictionary *sample = [self lastRequestBody][@"samples"][0];
+    NSDictionary *expected = @{@"50": @2, @"250": @1, @"1000": @1, @"inf": @1};
+    XCTAssertEqualObjects(sample[@"histogram"], expected);
+    XCTAssertEqualObjects(sample[@"request_count"], @5);
+}
+
+- (void)testKeepsHistogramCountsForTheNextFlushWhenDeliveryFails {
+    FOTConfiguration *config = [self configurationWithPath:@"/unauthorized"]; // answers 401: a failed delivery
+    FOTPerformanceFlusher *flusher = [self flusherForConfiguration:config];
+    [flusher recordTransaction:@"GET /posts" durationMs:10];
+    [flusher flush];
+
+    config.dsn = [NSString stringWithFormat:@"http://key@127.0.0.1:%lu/api/v1/events", (unsigned long)self.server.port];
+    [flusher recordTransaction:@"GET /posts" durationMs:300];
+    [flusher flush];
+
+    NSDictionary *expected = @{@"50": @1, @"500": @1};
+    XCTAssertEqualObjects([self lastRequestBody][@"samples"][0][@"histogram"], expected);
+}
+
+- (void)testAHistogramCountRecordedDuringDeliveryIsSentOnTheNextFlush {
+    FOTPerformanceFlusher *flusher = [self flusherForConfiguration:[self configurationWithPath:@"/api/v1/events"]];
+    [flusher recordTransaction:@"GET /posts" durationMs:10];
+    __weak FOTPerformanceFlusher *weakFlusher = flusher;
+    flusher.beforeDeliveryHook = ^{
+        weakFlusher.beforeDeliveryHook = nil;
+        [weakFlusher recordTransaction:@"GET /posts" durationMs:300]; // same transaction, mid-delivery
+        [weakFlusher recordTransaction:@"GET /new" durationMs:5];     // a brand-new one, mid-delivery
+    };
+
+    [flusher flush];
+    NSDictionary *firstExpected = @{@"50": @1};
+    XCTAssertEqualObjects([self lastRequestBody][@"samples"][0][@"histogram"], firstExpected);
+
+    [flusher flush];
+    NSMutableDictionary *byName = [NSMutableDictionary dictionary];
+    for (NSDictionary *sample in [self lastRequestBody][@"samples"]) {
+        byName[sample[@"transaction_name"]] = sample;
+    }
+    NSDictionary *postsExpected = @{@"500": @1};
+    NSDictionary *newExpected = @{@"50": @1};
+    XCTAssertEqualObjects(byName[@"GET /posts"][@"histogram"], postsExpected);
+    XCTAssertEqualObjects(byName[@"GET /new"][@"histogram"], newExpected);
+}
+
 - (void)testTheTimerFlushesOnItsOwnInterval {
     FOTConfiguration *config = [self configurationWithPath:@"/api/v1/events"];
     config.performanceFlushInterval = 0.05;

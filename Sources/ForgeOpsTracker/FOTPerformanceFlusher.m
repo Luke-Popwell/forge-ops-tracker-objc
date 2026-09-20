@@ -1,12 +1,22 @@
 #import "FOTPerformanceFlusher.h"
+#import "FOTHistogramBucketer.h"
 
 @interface FOTPerformanceBucket : NSObject
 @property (nonatomic) NSUInteger count;
 @property (nonatomic) double durationSumMs;
 @property (nonatomic) double maxDurationMs;
+// A count per latency bucket label, see FOTHistogramBucketer.
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *histogram;
 @end
 
 @implementation FOTPerformanceBucket
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _histogram = [NSMutableDictionary dictionary];
+    }
+    return self;
+}
 @end
 
 @implementation FOTPerformanceFlusher {
@@ -48,6 +58,10 @@
     if (durationMs > bucket.maxDurationMs) {
         bucket.maxDurationMs = durationMs;
     }
+    // The distribution count/sum/max can't reconstruct: see FOTHistogramBucketer for why the server
+    // approximates a percentile from these bucket counts.
+    NSString *label = [FOTHistogramBucketer bucketForDuration:durationMs];
+    bucket.histogram[label] = @(bucket.histogram[label].unsignedIntegerValue + 1);
     BOOL needsTimer = _timer == nil;
     [_lock unlock];
 
@@ -109,6 +123,7 @@
         copy.count = bucket.count;
         copy.durationSumMs = bucket.durationSumMs;
         copy.maxDurationMs = bucket.maxDurationMs;
+        copy.histogram = [bucket.histogram mutableCopy];
         snapshot[name] = copy;
     }];
     NSDate *periodStart = _periodStartedAt;
@@ -133,6 +148,7 @@
             @"request_count": @(bucket.count),
             @"duration_sum_ms": @(bucket.durationSumMs),
             @"max_duration_ms": @(bucket.maxDurationMs),
+            @"histogram": [bucket.histogram copy],
         }];
     }];
 
@@ -148,6 +164,14 @@
         }
         current.count = current.count > sent.count ? current.count - sent.count : 0;
         current.durationSumMs = MAX(0.0, current.durationSumMs - sent.durationSumMs);
+        [sent.histogram enumerateKeysAndObjectsUsingBlock:^(NSString *label, NSNumber *sentCount, BOOL *innerStop) {
+            NSInteger remaining = current.histogram[label].integerValue - sentCount.integerValue;
+            if (remaining > 0) {
+                current.histogram[label] = @(remaining);
+            } else {
+                [current.histogram removeObjectForKey:label];
+            }
+        }];
         // maxDurationMs is deliberately left as whatever is currently on the bucket, sent or not:
         // unlike count/durationSumMs, a max can't be correctly "subtracted" back out (the true max
         // of what's left is anything at or below it, not knowable from the two numbers alone), and
