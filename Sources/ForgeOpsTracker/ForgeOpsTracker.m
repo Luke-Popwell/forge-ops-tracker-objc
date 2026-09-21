@@ -121,6 +121,13 @@ static void FOTHandleUncaughtException(NSException *exception) {
     [self captureException:exception context:context user:nil];
 }
 
++ (void)captureException:(NSException *)exception sql:(NSString *)sql context:(NSDictionary<NSString *, id> *)context {
+    [[self reporter] reportException:exception context:context user:FOTCurrentUser breadcrumbs:[[self breadcrumbBuffer] all] sql:sql];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [[self reporter] uploadPendingReports];
+    });
+}
+
 + (void)captureException:(NSException *)exception
                   context:(NSDictionary<NSString *, id> *)context
                      user:(NSDictionary<NSString *, id> *)user {

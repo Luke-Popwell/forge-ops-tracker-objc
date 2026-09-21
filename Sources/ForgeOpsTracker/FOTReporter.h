@@ -45,6 +45,14 @@ NS_ASSUME_NONNULL_BEGIN
  * and leaving a failed one in place for the next attempt. Deliberately synchronous: call this
  * from a background queue at startup, not the main thread.
  */
+/** The same as the above, plus the raw SQL statement behind the exception (nil to look for it on the
+ * exception itself): see FOTEventBuilder's own sql: method. */
+- (void)reportException:(NSException *)exception
+                 context:(nullable NSDictionary<NSString *, id> *)context
+                    user:(nullable NSDictionary<NSString *, id> *)user
+             breadcrumbs:(nullable NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
+                     sql:(nullable NSString *)sql;
+
 - (void)uploadPendingReports;
 
 @end

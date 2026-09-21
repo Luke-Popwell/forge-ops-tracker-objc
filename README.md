@@ -278,6 +278,31 @@ To disable it:
 config.scrubPII = NO;
 ```
 
+## Database errors
+
+Apple's local databases expose little on their errors, so the code that ran the query can attach the SQL under `FOTSqlStatementKey` in an exception's `userInfo`, or pass it to `+[ForgeOpsTracker captureException:sql:context:]`. The event then includes the names of the tables and views (and any stored procedure) that SQL touched, so the issue tells you where to start looking. SQLite's own `while compiling: ...` error text is recognized too. Names are identifiers, never values; the raw statement never leaves the process.
+
+To also send the SQL statement itself, opt in. Every string and number is replaced by `?` before it
+leaves your process (`WHERE email = 'a@b.co' AND id = 42` is sent as `WHERE email = ? AND id = ?`),
+and ForgeOps masks it again on arrival:
+
+```objc
+@catch (NSException *exception) {
+    [ForgeOpsTracker captureException:exception sql:query context:nil];
+}
+
+// Opt in to also sending the masked statement (default NO).
+[ForgeOpsTracker configureWithBlock:^(FOTConfiguration *config) {
+    config.captureSqlStatement = YES;
+    // config.captureSqlObjects = NO; // default YES; NO stops even the names
+}];
+```
+
+Each ForgeOps project also has its own "Capture the SQL behind database errors" setting. Turn it off
+there and the statement is never stored for that project, whatever this flag says; the names are
+still kept. A view and a table are written the same way in SQL, so both show as tables/views; the
+database's own error message usually settles which it was.
+
 ## Running the tests
 
 This is a library meant to be dropped into a host app's own Xcode project, not an app itself, so

@@ -12,6 +12,8 @@
                          // request, so there's no user-facing latency to protect.
         _scrubPII = YES;
         _captureSourceContext = YES;
+        _captureSqlObjects = YES;
+        _captureSqlStatement = NO;
         _trackBreadcrumbs = YES;
         _maxBreadcrumbs = 30;
         _trackPerformance = YES;

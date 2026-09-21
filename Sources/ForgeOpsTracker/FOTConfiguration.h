@@ -38,6 +38,19 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @property (nonatomic, assign) BOOL captureSourceContext;
 
+/**
+ * When an exception carries the SQL behind a failed database call (attached under FOTSqlStatementKey
+ * in its userInfo, or passed to +[ForgeOpsTracker captureException:sql:context:], or SQLite's own
+ * `while compiling:` text), send the names of the stored procedure, table and view that SQL touched,
+ * so an issue says where to start looking. Names are identifiers, never values, which is why this
+ * defaults to YES. captureSqlStatement is the separate, opt-in step (default NO) of also sending the
+ * statement itself, with every string and number replaced by "?"; off by default because even a
+ * masked statement describes your schema, and ForgeOps' own per-project setting is what durably
+ * governs whether the server stores it. See FOTSqlStatement.h.
+ */
+@property (nonatomic, assign) BOOL captureSqlObjects;
+@property (nonatomic, assign) BOOL captureSqlStatement;
+
 /** Whether +addBreadcrumb: methods record anything at all. Defaults to YES, matching every other client in this repo. */
 @property (nonatomic, assign) BOOL trackBreadcrumbs;
 

@@ -1,4 +1,5 @@
 #import "FOTEventBuilder.h"
+#import "FOTSqlStatement.h"
 #import "FOTPiiScrubber.h"
 
 static const NSUInteger FOTMaxFrames = 500;
@@ -58,6 +59,14 @@ static NSRegularExpression *FOTFrameRegex(void) {
                                                    context:(NSDictionary<NSString *, id> *)context
                                                       user:(NSDictionary<NSString *, id> *)user
                                                breadcrumbs:(NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs {
+    return [self buildEventForException:exception context:context user:user breadcrumbs:breadcrumbs sql:nil];
+}
+
+- (NSDictionary<NSString *, id> *)buildEventForException:(NSException *)exception
+                                                   context:(NSDictionary<NSString *, id> *)context
+                                                      user:(NSDictionary<NSString *, id> *)user
+                                               breadcrumbs:(NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
+                                                       sql:(NSString *)sql {
     NSISO8601DateFormatter *formatter = [[NSISO8601DateFormatter alloc] init];
     formatter.formatOptions = NSISO8601DateFormatWithInternetDateTime; // no fractional seconds, matches every other SDK's payload
 
@@ -74,6 +83,22 @@ static NSRegularExpression *FOTFrameRegex(void) {
     payload[@"sdk_name"] = FOTSdkName;
     if (breadcrumbs.count > 0) {
         payload[@"breadcrumbs"] = breadcrumbs;
+    }
+
+    // See FOTSqlStatement.h. The statement itself only goes out when captureSqlStatement is on; the
+    // extracted names go out on their own (captureSqlObjects) so an issue can still name the
+    // procedure or view involved. Scrubbed with everything else below, like every other field.
+    if (_configuration.captureSqlObjects || _configuration.captureSqlStatement) {
+        NSString *masked = [FOTSqlStatement maskedStatement:sql ?: [FOTSqlStatement statementInException:exception]];
+        if (masked != nil) {
+            NSDictionary<NSString *, id> *objects = _configuration.captureSqlObjects ? [FOTSqlStatement objectsInMaskedStatement:masked] : nil;
+            if (objects != nil) {
+                payload[@"sql_objects"] = objects;
+            }
+            if (_configuration.captureSqlStatement) {
+                payload[@"sql_statement"] = masked;
+            }
+        }
     }
 
     NSDictionary<NSString *, id> *scrubbed = _configuration.scrubPII ? [FOTPiiScrubber scrub:payload key:nil] : payload;

@@ -59,6 +59,19 @@ NS_ASSUME_NONNULL_BEGIN
                                                       user:(nullable NSDictionary<NSString *, id> *)user
                                                breadcrumbs:(nullable NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs;
 
+/**
+ * The same as the above, plus the raw SQL statement behind the exception when the caller has one
+ * (nil to look for it on the exception itself: see FOTSqlStatement). The statement is masked here
+ * before anything is attached: with captureSqlObjects on, a top-level "sql_objects" names the
+ * procedures/tables/views it touched; with captureSqlStatement on too, a top-level "sql_statement"
+ * carries the masked text. The raw statement is never written to the payload.
+ */
+- (NSDictionary<NSString *, id> *)buildEventForException:(NSException *)exception
+                                                   context:(nullable NSDictionary<NSString *, id> *)context
+                                                      user:(nullable NSDictionary<NSString *, id> *)user
+                                               breadcrumbs:(nullable NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
+                                                       sql:(nullable NSString *)sql;
+
 @end
 
 NS_ASSUME_NONNULL_END

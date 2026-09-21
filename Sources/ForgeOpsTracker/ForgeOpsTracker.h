@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "FOTConfiguration.h"
+#import "FOTSqlStatement.h"
 #import "FOTTrace.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -36,6 +37,17 @@ NS_ASSUME_NONNULL_BEGIN
  * override that for this one report.
  */
 + (void)captureException:(NSException *)exception context:(nullable NSDictionary<NSString *, id> *)context;
+
+/**
+ * Same as captureException:context:, for an exception caused by a database call: pass the SQL that
+ * ran. With captureSqlObjects on (the default), the names of the stored procedure, table and view
+ * the statement touched are sent, so an issue says where to start looking. With captureSqlStatement
+ * on too (off by default), the statement itself is sent as well, with every string and number
+ * replaced by "?" first. The raw statement never leaves the process either way. You can instead
+ * attach it to the exception itself under FOTSqlStatementKey in its userInfo and call the plain
+ * captureException:context:.
+ */
++ (void)captureException:(NSException *)exception sql:(NSString *)sql context:(nullable NSDictionary<NSString *, id> *)context;
 
 /** Same as captureException:context:, with an explicit user overriding whatever +setUser: last set. */
 + (void)captureException:(NSException *)exception
