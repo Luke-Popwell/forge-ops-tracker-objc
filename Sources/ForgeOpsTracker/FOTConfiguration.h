@@ -82,6 +82,25 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) NSTimeInterval traceCaptureThreshold;
 
 /**
+ * Whether -[FOTTrace startRequestSpan:] (and everything built on it) adds a W3C traceparent header
+ * (https://www.w3.org/TR/trace-context/) to the request, so a backend that also reports to ForgeOps
+ * continues this trace instead of starting its own. Defaults to YES, matching gems/forge_ops_tracker's
+ * propagate_traces. NO still records the http span; it only stops the header. A request that
+ * already carries a traceparent is never changed.
+ */
+@property (nonatomic, assign) BOOL propagateTraces;
+
+/**
+ * Which hosts get that header. nil (the default) means every host. Otherwise each entry is either
+ * an NSString, matching that exact host or any subdomain of it on a dot boundary ("example.com"
+ * matches "api.example.com" but not "badexample.com"; case-insensitive, a leading dot ignored), or
+ * an NSRegularExpression, matched anywhere in the lowercased host. Anything else matches nothing.
+ * Worth narrowing when the app also calls third-party APIs that reject unknown headers or shouldn't
+ * learn this app's trace ids.
+ */
+@property (nonatomic, copy, nullable) NSArray *tracePropagationTargets;
+
+/**
  * How often the buffered +captureMetric:/+captureInfrastructureMetric: entries are flushed as one
  * batch, in seconds (60 by default). There is no trackMetrics flag the way trackPerformance has one:
  * these are explicit calls the host app's own code makes, not automatic instrumentation, so there is
@@ -112,6 +131,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSURL *)spansURL;
 
 - (BOOL)isEnabled;
+
+/**
+ * Whether a request to host should carry a traceparent header: see propagateTraces and
+ * tracePropagationTargets. A request with no host at all only gets one when every host does.
+ */
+- (BOOL)shouldPropagateTraceToHost:(nullable NSString *)host;
 
 @end
 

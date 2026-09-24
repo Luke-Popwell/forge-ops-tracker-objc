@@ -18,7 +18,9 @@ static FOTMetricBuffer *FOTSharedMetricBuffer = nil;
 static FOTMetricBuffer *FOTSharedInfrastructureMetricBuffer = nil;
 
 static void FOTHandleUncaughtException(NSException *exception) {
-    [FOTSharedReporter reportException:exception context:nil user:FOTCurrentUser breadcrumbs:[FOTSharedBreadcrumbs all]];
+    // The handler runs on the raising thread, so a trace whose synchronous block raised is still
+    // current here.
+    [FOTSharedReporter reportException:exception context:nil user:FOTCurrentUser breadcrumbs:[FOTSharedBreadcrumbs all] sql:nil traceId:[FOTTrace current].traceId];
     // Chain to whatever handler (if any) was already installed: another crash reporter, a
     // debugger, or the host app's own: rather than silently replacing it, the same "rethrow,
     // don't swallow" invariant every other framework integration in this repo holds to.
@@ -122,7 +124,7 @@ static void FOTHandleUncaughtException(NSException *exception) {
 }
 
 + (void)captureException:(NSException *)exception sql:(NSString *)sql context:(NSDictionary<NSString *, id> *)context {
-    [[self reporter] reportException:exception context:context user:FOTCurrentUser breadcrumbs:[[self breadcrumbBuffer] all] sql:sql];
+    [[self reporter] reportException:exception context:context user:FOTCurrentUser breadcrumbs:[[self breadcrumbBuffer] all] sql:sql traceId:[FOTTrace current].traceId];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         [[self reporter] uploadPendingReports];
     });
@@ -131,7 +133,15 @@ static void FOTHandleUncaughtException(NSException *exception) {
 + (void)captureException:(NSException *)exception
                   context:(NSDictionary<NSString *, id> *)context
                      user:(NSDictionary<NSString *, id> *)user {
-    [[self reporter] reportException:exception context:context user:user ?: FOTCurrentUser breadcrumbs:[[self breadcrumbBuffer] all]];
+    [self captureException:exception context:context user:user trace:nil];
+}
+
++ (void)captureException:(NSException *)exception
+                  context:(NSDictionary<NSString *, id> *)context
+                     user:(NSDictionary<NSString *, id> *)user
+                    trace:(FOTTrace *)trace {
+    NSString *traceId = (trace ?: [FOTTrace current]).traceId;
+    [[self reporter] reportException:exception context:context user:user ?: FOTCurrentUser breadcrumbs:[[self breadcrumbBuffer] all] sql:nil traceId:traceId];
     // Unlike an uncaught exception, this one didn't crash the process: upload it now rather
     // than waiting for a next launch that (having not crashed) has no particular reason to come
     // soon. Still off the calling thread, for the same reason as installHandlers above.
@@ -249,11 +259,28 @@ static void FOTHandleUncaughtException(NSException *exception) {
 
 + (void)traceNamed:(NSString *)name block:(NS_NOESCAPE void (^)(FOTTrace *_Nullable))block {
     FOTTrace *trace = [self startTrace:name];
+    if (trace != nil) {
+        [FOTTrace pushCurrent:trace];
+    }
     @try {
         block(trace);
     } @finally {
+        if (trace != nil) {
+            [FOTTrace popCurrent:trace];
+        }
         [trace finish];
     }
+}
+
++ (NSURLSessionDataTask *)dataTaskWithSession:(NSURLSession *)session
+                                      request:(NSURLRequest *)request
+                                        trace:(FOTTrace *)trace
+                            completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
+    FOTRequestSpan *span = [FOTRequestSpan startWithRequest:request trace:trace name:nil];
+    return [session dataTaskWithRequest:span.request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        [span finishWithResponse:response error:error];
+        completionHandler(data, response, error);
+    }];
 }
 
 + (void)flushSpans {

@@ -162,8 +162,9 @@ would otherwise be silently discarded, a real bug `sdks/go` had and fixed and th
 
 One flow's own call tree (a screen load, a sign-in, a network round trip and what it triggered),
 shown as a span tree on ForgeOps. A trace is sent only when the whole flow took at least
-`traceCaptureThreshold` seconds (1 by default), so fast flows cost nothing on the wire. Traces are
-per app; nothing is propagated across services.
+`traceCaptureThreshold` seconds (1 by default), so fast flows cost nothing on the wire. A request
+your app makes inside a trace can carry the trace on to your backend, so an error in the app links to
+the backend request it caused (see "Connecting app errors to your backend" below).
 
 ```objc
 [ForgeOpsTracker traceNamed:@"load home screen" block:^(FOTTrace *trace) {
@@ -193,6 +194,94 @@ flushed at exit and an iOS app is suspended shortly after it backgrounds, so cal
 `[ForgeOpsTracker flushSpans]` (synchronous, on a background queue if you would rather not block the
 main thread) from `applicationDidEnterBackground:` or before a command-line tool quits. Turn the
 feature off with `config.trackTracing = NO`.
+
+### Connecting app errors to your backend
+
+Trace and span ids use the [W3C Trace Context](https://www.w3.org/TR/trace-context/) format (a 32
+character lowercase hex trace id, 16 character span ids). Send a request through the trace and it goes
+out with a `traceparent` header (`00-<trace id>-<span id>-01`) and is recorded as an `http` span named
+after its method and host; the header's parent id is that span's own id, so the backend's own spans for
+the request nest under it. An error captured with the trace carries its `trace_id`, which is what links
+it to the backend error from the same request. A checkout flow:
+
+```objc
+- (void)placeOrder:(NSData *)body orderId:(NSString *)orderId {
+    FOTTrace *trace = [ForgeOpsTracker startTrace:@"checkout"];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.example.com/orders"]];
+    request.HTTPMethod = @"POST";
+    request.HTTPBody = body;
+
+    [[ForgeOpsTracker dataTaskWithSession:NSURLSession.sharedSession
+                                  request:request
+                                    trace:trace
+                        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (((NSHTTPURLResponse *)response).statusCode != 201) {
+            NSException *failure = [NSException exceptionWithName:@"CheckoutRejected" reason:@"order was not created" userInfo:nil];
+            [ForgeOpsTracker captureException:failure context:@{ @"orderId": orderId } user:nil trace:trace];
+        }
+        [trace finish];
+    }] resume];
+}
+```
+
+`dataTaskWithSession:request:trace:completionHandler:` returns a data task you resume yourself; the
+span is recorded (with the status code) before your completion handler runs. A `nil` trace (tracing off
+or reporting disabled) makes it a plain data task. For any other transport, start the span yourself:
+
+```objc
+FOTRequestSpan *span = [FOTRequestSpan startWithRequest:request trace:trace name:nil]; // or [trace startRequestSpan:request]
+// send span.request (yours plus the header), or put span.traceparent on a transport that takes no NSURLRequest
+[span finishWithResponse:response error:error]; // any thread; only the first call records anything
+```
+
+The public API:
+
+```objc
+// FOTTrace
+@property (readonly) NSString *traceId;
+- (FOTRequestSpan *)startRequestSpan:(NSURLRequest *)request;
+- (FOTRequestSpan *)startRequestSpan:(NSURLRequest *)request name:(nullable NSString *)name;
+
+// FOTRequestSpan
++ (instancetype)startWithRequest:(NSURLRequest *)request trace:(nullable FOTTrace *)trace name:(nullable NSString *)name;
+@property (readonly) NSURLRequest *request;           // yours, plus the traceparent header when one was added
+@property (readonly, nullable) NSString *spanId;
+@property (readonly, nullable) NSString *traceparent; // the header value added, if any
+- (void)finishWithResponse:(nullable NSURLResponse *)response error:(nullable NSError *)error;
+
+// ForgeOpsTracker
++ (NSURLSessionDataTask *)dataTaskWithSession:request:trace:completionHandler:
++ (void)captureException:context:user:trace:
+```
+
+`[trace startRequestSpan:]` on a `nil` trace returns `nil` (messaging `nil` does), which is why the
+nil-safe `startWithRequest:trace:name:` exists. Inside the block of `traceNamed:block:` or
+`measureSpan:kind:block:`, the trace is current on that thread, so a plain
+`captureException:context:` there carries its `trace_id` without passing it (and so does an uncaught
+`NSException` raised there). A completion handler runs on another queue, so pass `trace:` explicitly
+there. An error captured with no trace has no `trace_id` and is exactly what it was before; a fatal
+signal's report never has one, since the signal handler can't safely read it. A request that already
+has a `traceparent` header is left alone. Nothing instruments `NSURLSession` automatically: only
+requests you send through these calls get the header.
+
+Two options control the header:
+
+```objc
+[ForgeOpsTracker configureWithBlock:^(FOTConfiguration *config) {
+    config.propagateTraces = YES;          // default; NO stops the header (the http span is still recorded)
+    config.tracePropagationTargets = nil;  // default: every host
+    // or only your own backends: a string matches that host exactly or as a subdomain on a dot
+    // boundary ("example.com" matches "api.example.com", not "badexample.com"); an
+    // NSRegularExpression is matched against the lowercased host
+    config.tracePropagationTargets = @[ @"example.com",
+                                        [NSRegularExpression regularExpressionWithPattern:@"\\.internal$" options:0 error:nil] ];
+}];
+```
+
+Narrow the targets when the app also calls third-party APIs that reject unknown headers or shouldn't
+see your trace ids. To see the app error and the backend error together, the backend must also report
+to ForgeOps (the Ruby SDK continues the trace from the header automatically as of 0.12.0) and the two
+projects must be linked in ForgeOps.
 
 ## Custom metrics and infrastructure monitoring
 

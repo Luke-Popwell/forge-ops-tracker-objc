@@ -49,11 +49,20 @@
                     user:(NSDictionary<NSString *, id> *)user
              breadcrumbs:(NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
                      sql:(NSString *)sql {
+    [self reportException:exception context:context user:user breadcrumbs:breadcrumbs sql:sql traceId:nil];
+}
+
+- (void)reportException:(NSException *)exception
+                 context:(NSDictionary<NSString *, id> *)context
+                    user:(NSDictionary<NSString *, id> *)user
+             breadcrumbs:(NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
+                     sql:(NSString *)sql
+                 traceId:(NSString *)traceId {
     @try {
         if (![_configuration isEnabled]) {
             return;
         }
-        NSDictionary<NSString *, id> *payload = [_eventBuilder buildEventForException:exception context:context user:user breadcrumbs:breadcrumbs sql:sql];
+        NSDictionary<NSString *, id> *payload = [_eventBuilder buildEventForException:exception context:context user:user breadcrumbs:breadcrumbs sql:sql traceId:traceId];
         [_crashStore writePayload:payload];
     } @catch (NSException *reportingFailure) {
         // Deliberately swallowed: an error reporter that itself throws while reporting a crash is

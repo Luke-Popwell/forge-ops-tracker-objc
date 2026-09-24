@@ -53,6 +53,14 @@ NS_ASSUME_NONNULL_BEGIN
              breadcrumbs:(nullable NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
                      sql:(nullable NSString *)sql;
 
+/** The same as the above, plus the trace id of the trace the exception happened in (nil for none): see FOTEventBuilder's own traceId: method. */
+- (void)reportException:(NSException *)exception
+                 context:(nullable NSDictionary<NSString *, id> *)context
+                    user:(nullable NSDictionary<NSString *, id> *)user
+             breadcrumbs:(nullable NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
+                     sql:(nullable NSString *)sql
+                 traceId:(nullable NSString *)traceId;
+
 - (void)uploadPendingReports;
 
 @end

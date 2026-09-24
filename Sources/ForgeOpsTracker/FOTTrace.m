@@ -1,4 +1,5 @@
 #import "FOTTrace.h"
+#import "FOTRequestSpan.h"
 
 static const NSUInteger FOTMaxSpans = 500;
 
@@ -11,6 +12,20 @@ static NSString *FOTRandomHex(NSUInteger bytes) {
     }
     return out;
 }
+
+// The W3C spec reserves all zeros as invalid, and a receiver discards a header carrying one, so that
+// one value in 2^64 (or 2^128) is drawn again rather than sent.
+static NSString *FOTNonZeroHex(NSUInteger bytes) {
+    while (YES) {
+        NSString *hex = FOTRandomHex(bytes);
+        if ([hex rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0"] invertedSet]].location != NSNotFound) {
+            return hex;
+        }
+    }
+}
+
+// The traces current on the calling thread, innermost last: see +[FOTTrace current].
+static NSString *const FOTCurrentTracesKey = @"com.forgeops.tracker.current-traces";
 
 static NSString *FOTTimestamp(NSDate *date) {
     static NSDateFormatter *formatter;
@@ -37,9 +52,7 @@ static NSString *FOTNormalizedKind(NSString *kind) {
 
 @implementation FOTTrace {
     NSString *_name;
-    FOTConfiguration *_configuration;
     void (^_deliver)(NSDictionary<NSString *, id> *);
-    NSString *_traceId;
     NSString *_rootSpanId;
     NSDate *_startedAt;
     CFAbsoluteTime _timer;
@@ -57,8 +70,8 @@ static NSString *FOTNormalizedKind(NSString *kind) {
         _name = [name copy];
         _configuration = configuration;
         _deliver = [deliver copy];
-        _traceId = FOTRandomHex(16);
-        _rootSpanId = FOTRandomHex(8);
+        _traceId = [FOTTrace generateTraceId];
+        _rootSpanId = [FOTTrace generateSpanId];
         _startedAt = [NSDate date];
         _timer = CFAbsoluteTimeGetCurrent();
         _lock = [[NSLock alloc] init];
@@ -117,23 +130,80 @@ static NSString *FOTNormalizedKind(NSString *kind) {
 }
 
 - (void)measureSpan:(NSString *)name kind:(NSString *)kind data:(NSDictionary<NSString *, id> *)data block:(NS_NOESCAPE void (^)(void))block {
-    NSString *spanId = FOTRandomHex(8);
+    NSString *spanId = [FOTTrace generateSpanId];
     NSString *parent = [self currentParent];
     NSMutableArray<NSString *> *stack = [self openSpansOnThreadCreating:YES];
     [stack addObject:spanId];
+    [FOTTrace pushCurrent:self];
     NSDate *startedAt = [NSDate date];
     CFAbsoluteTime timer = CFAbsoluteTimeGetCurrent();
     @try {
         block();
     } @finally {
         double durationMs = (CFAbsoluteTimeGetCurrent() - timer) * 1000.0;
+        [FOTTrace popCurrent:self];
         [stack removeObject:spanId];
         [self storeSpan:[self spanWithId:spanId parent:parent name:name kind:kind startedAt:startedAt durationMs:durationMs data:data]];
     }
 }
 
 - (void)recordSpan:(NSString *)name kind:(NSString *)kind startedAt:(NSDate *)startedAt durationMs:(double)durationMs data:(NSDictionary<NSString *, id> *)data {
-    [self storeSpan:[self spanWithId:FOTRandomHex(8) parent:[self currentParent] name:name kind:kind startedAt:startedAt durationMs:durationMs data:data]];
+    [self storeSpan:[self spanWithId:[FOTTrace generateSpanId] parent:[self currentParent] name:name kind:kind startedAt:startedAt durationMs:durationMs data:data]];
+}
+
+- (void)recordSpanWithId:(NSString *)spanId
+                  parent:(NSString *)parent
+                    name:(NSString *)name
+                    kind:(NSString *)kind
+               startedAt:(NSDate *)startedAt
+              durationMs:(double)durationMs
+                    data:(NSDictionary<NSString *, id> *)data {
+    [self storeSpan:[self spanWithId:spanId parent:parent name:name kind:kind startedAt:startedAt durationMs:durationMs data:data]];
+}
+
+- (FOTRequestSpan *)startRequestSpan:(NSURLRequest *)request {
+    return [self startRequestSpan:request name:nil];
+}
+
+- (FOTRequestSpan *)startRequestSpan:(NSURLRequest *)request name:(NSString *)name {
+    return [FOTRequestSpan startWithRequest:request trace:self name:name];
+}
+
++ (FOTTrace *)current {
+    return [[NSThread currentThread].threadDictionary[FOTCurrentTracesKey] lastObject];
+}
+
++ (void)pushCurrent:(FOTTrace *)trace {
+    NSMutableDictionary *threadDictionary = [NSThread currentThread].threadDictionary;
+    NSMutableArray<FOTTrace *> *stack = threadDictionary[FOTCurrentTracesKey];
+    if (stack == nil) {
+        stack = [NSMutableArray array];
+        threadDictionary[FOTCurrentTracesKey] = stack;
+    }
+    [stack addObject:trace];
+}
+
++ (void)popCurrent:(FOTTrace *)trace {
+    NSMutableDictionary *threadDictionary = [NSThread currentThread].threadDictionary;
+    NSMutableArray<FOTTrace *> *stack = threadDictionary[FOTCurrentTracesKey];
+    NSUInteger index = [stack indexOfObjectWithOptions:NSEnumerationReverse passingTest:^BOOL(FOTTrace *candidate, NSUInteger i, BOOL *stop) {
+        return candidate == trace;
+    }];
+    if (index == NSNotFound) {
+        return;
+    }
+    [stack removeObjectAtIndex:index];
+    if (stack.count == 0) {
+        [threadDictionary removeObjectForKey:FOTCurrentTracesKey];
+    }
+}
+
++ (NSString *)generateTraceId {
+    return FOTNonZeroHex(16);
+}
+
++ (NSString *)generateSpanId {
+    return FOTNonZeroHex(8);
 }
 
 - (void)finish {

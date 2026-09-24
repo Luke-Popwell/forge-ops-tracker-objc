@@ -67,6 +67,15 @@ static NSRegularExpression *FOTFrameRegex(void) {
                                                       user:(NSDictionary<NSString *, id> *)user
                                                breadcrumbs:(NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
                                                        sql:(NSString *)sql {
+    return [self buildEventForException:exception context:context user:user breadcrumbs:breadcrumbs sql:sql traceId:nil];
+}
+
+- (NSDictionary<NSString *, id> *)buildEventForException:(NSException *)exception
+                                                   context:(NSDictionary<NSString *, id> *)context
+                                                      user:(NSDictionary<NSString *, id> *)user
+                                               breadcrumbs:(NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
+                                                       sql:(NSString *)sql
+                                                   traceId:(NSString *)traceId {
     NSISO8601DateFormatter *formatter = [[NSISO8601DateFormatter alloc] init];
     formatter.formatOptions = NSISO8601DateFormatWithInternetDateTime; // no fractional seconds, matches every other SDK's payload
 
@@ -103,11 +112,17 @@ static NSRegularExpression *FOTFrameRegex(void) {
 
     NSDictionary<NSString *, id> *scrubbed = _configuration.scrubPII ? [FOTPiiScrubber scrub:payload key:nil] : payload;
 
-    // Merged in after scrubbing, never before: see this method's own header comment on why.
-    if (user.count > 0) {
-        NSMutableDictionary<NSString *, id> *withUser = [scrubbed mutableCopy];
-        withUser[@"user"] = user;
-        return withUser;
+    // Merged in after scrubbing, never before: see this method's own header comment on why. The
+    // trace id likewise: a structured id, exempt from scrubbing like every SDK's trace_id.
+    if (user.count > 0 || traceId != nil) {
+        NSMutableDictionary<NSString *, id> *withExtras = [scrubbed mutableCopy];
+        if (user.count > 0) {
+            withExtras[@"user"] = user;
+        }
+        if (traceId != nil) {
+            withExtras[@"trace_id"] = traceId;
+        }
+        return withExtras;
     }
     return scrubbed;
 }

@@ -22,6 +22,7 @@
         _metricFlushInterval = 60.0;
         _infrastructureMetricFlushInterval = 60.0;
         _traceCaptureThreshold = 1.0;
+        _propagateTraces = YES;
 
         NSArray<NSString *> *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
         NSString *base = caches.firstObject ?: NSTemporaryDirectory();
@@ -116,6 +117,37 @@
         return NO;
     }
     return [self.enabledEnvironments containsObject:self.environment];
+}
+
+- (BOOL)shouldPropagateTraceToHost:(NSString *)host {
+    if (!self.propagateTraces) {
+        return NO;
+    }
+    NSArray *targets = self.tracePropagationTargets;
+    if (targets == nil) {
+        return YES;
+    }
+    // Hostnames are case-insensitive, so every comparison below is against the lowercased host.
+    NSString *lowered = host.lowercaseString;
+    if (lowered.length == 0) {
+        return NO;
+    }
+    for (id target in targets) {
+        if ([target isKindOfClass:[NSString class]]) {
+            NSString *wanted = [(NSString *)target lowercaseString];
+            if ([wanted hasPrefix:@"."]) {
+                wanted = [wanted substringFromIndex:1];
+            }
+            if (wanted.length > 0 && ([lowered isEqualToString:wanted] || [lowered hasSuffix:[@"." stringByAppendingString:wanted]])) {
+                return YES;
+            }
+        } else if ([target isKindOfClass:[NSRegularExpression class]]) {
+            if ([(NSRegularExpression *)target firstMatchInString:lowered options:0 range:NSMakeRange(0, lowered.length)] != nil) {
+                return YES;
+            }
+        }
+    }
+    return NO;
 }
 
 @end

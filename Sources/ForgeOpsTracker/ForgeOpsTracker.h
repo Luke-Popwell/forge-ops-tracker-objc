@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "FOTConfiguration.h"
+#import "FOTRequestSpan.h"
 #import "FOTSqlStatement.h"
 #import "FOTTrace.h"
 
@@ -53,6 +54,20 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)captureException:(NSException *)exception
                   context:(nullable NSDictionary<NSString *, id> *)context
                      user:(nullable NSDictionary<NSString *, id> *)user;
+
+/**
+ * Same as captureException:context:user:, linked to trace: the event carries its trace_id, so
+ * ForgeOps shows it next to a backend error from the same request (see
+ * -[FOTTrace startRequestSpan:]). Without one (nil, or any of the other capture methods), the trace
+ * whose synchronous block is running on this thread (+traceNamed:block:, -measureSpan:kind:block:)
+ * is used, if any; code in a completion handler or on another queue should pass it explicitly. No
+ * trace, no trace_id: the event is exactly what it was before. An uncaught NSException raised
+ * inside such a block carries that trace's id too.
+ */
++ (void)captureException:(NSException *)exception
+                  context:(nullable NSDictionary<NSString *, id> *)context
+                     user:(nullable NSDictionary<NSString *, id> *)user
+                    trace:(nullable FOTTrace *)trace;
 
 /**
  * Manually attaches an affected user to whatever gets reported from here on: an explicit
@@ -167,8 +182,10 @@ NS_ASSUME_NONNULL_BEGIN
 /**
  * Distributed tracing: one flow's own call tree (a screen load, a sign-in, a network round trip and
  * what it triggered), sent to ForgeOps only when the whole thing took at least
- * FOTConfiguration.traceCaptureThreshold (1s), so fast flows cost nothing on the wire. Traces are
- * per app: nothing is propagated across services.
+ * FOTConfiguration.traceCaptureThreshold (1s), so fast flows cost nothing on the wire. An outgoing
+ * request made through -[FOTTrace startRequestSpan:] (or +dataTaskWithSession:request:trace:
+ * completionHandler:) carries a W3C traceparent header, so a backend that also reports to ForgeOps
+ * continues the trace, and an error captured with the trace carries its trace_id.
  *
  *   [ForgeOpsTracker traceNamed:@"load home screen" block:^(FOTTrace *trace) {
  *       [trace measureSpan:@"fetch feed" kind:@"http" block:^{ [self fetchFeed]; }];
@@ -189,8 +206,24 @@ NS_ASSUME_NONNULL_BEGIN
  */
 + (nullable FOTTrace *)startTrace:(NSString *)name;
 
-/** Runs block with a new trace and finishes it afterward, even if block raises an NSException (which then propagates unchanged). block receives nil when tracing is off, so it is always safe to message. */
+/** Runs block with a new trace and finishes it afterward, even if block raises an NSException (which then propagates unchanged). block receives nil when tracing is off, so it is always safe to message. While block runs, the trace is current on this thread, so captureException: there links to it. */
 + (void)traceNamed:(NSString *)name block:(NS_NOESCAPE void (^)(FOTTrace *_Nullable trace))block;
+
+/**
+ * An NSURLSession data task (not yet resumed) for request, sent inside trace: the request carries a
+ * traceparent header and an http span is recorded when it completes, before completionHandler runs
+ * (see -[FOTTrace startRequestSpan:]). With a nil trace it is a plain data task for request, so
+ * callers never need to check whether tracing is on.
+ *
+ *   [[ForgeOpsTracker dataTaskWithSession:NSURLSession.sharedSession request:request trace:trace
+ *                        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+ *       ...
+ *   }] resume];
+ */
++ (NSURLSessionDataTask *)dataTaskWithSession:(NSURLSession *)session
+                                      request:(NSURLRequest *)request
+                                        trace:(nullable FOTTrace *)trace
+                            completionHandler:(void (^)(NSData *_Nullable data, NSURLResponse *_Nullable response, NSError *_Nullable error))completionHandler;
 
 /**
  * Delivers every finished trace that is still queued right now (synchronously: blocks the calling

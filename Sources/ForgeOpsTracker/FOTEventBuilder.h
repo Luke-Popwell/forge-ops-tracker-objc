@@ -72,6 +72,19 @@ NS_ASSUME_NONNULL_BEGIN
                                                breadcrumbs:(nullable NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
                                                        sql:(nullable NSString *)sql;
 
+/**
+ * The same as the above, plus the W3C trace id of the trace this exception happened in (see
+ * FOTTrace), attached as a top-level "trace_id" (omitted when nil). That id is what links the event
+ * to errors other projects reported for the same request. Merged in after scrubbing, like the
+ * user: it is a structured id this SDK generated, not free text, and must arrive intact.
+ */
+- (NSDictionary<NSString *, id> *)buildEventForException:(NSException *)exception
+                                                   context:(nullable NSDictionary<NSString *, id> *)context
+                                                      user:(nullable NSDictionary<NSString *, id> *)user
+                                               breadcrumbs:(nullable NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs
+                                                       sql:(nullable NSString *)sql
+                                                   traceId:(nullable NSString *)traceId;
+
 @end
 
 NS_ASSUME_NONNULL_END
