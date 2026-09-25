@@ -38,8 +38,44 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)measureSpan:(NSString *)name kind:(NSString *)kind block:(NS_NOESCAPE void (^)(void))block;
 - (void)measureSpan:(NSString *)name kind:(NSString *)kind data:(nullable NSDictionary<NSString *, id> *)data block:(NS_NOESCAPE void (^)(void))block;
 
+/**
+ * The same, for a "database" span that also carries the SQL it ran (a local SQLite query, say) and
+ * which database it was ("sqlite"): sent in the span's data as db.statement, with every string and
+ * number literal replaced by "?" first (so values never leave the device) and cut at 4000
+ * characters, and db.system, lowercased. Both are ignored on any other kind, and either may be nil.
+ *
+ *     [trace measureSpan:@"Load orders" kind:@"database" data:nil statement:sql dbSystem:@"sqlite" block:^{
+ *         rows = [db query:sql];
+ *     }];
+ */
+- (void)measureSpan:(NSString *)name
+               kind:(NSString *)kind
+               data:(nullable NSDictionary<NSString *, id> *)data
+          statement:(nullable NSString *)statement
+           dbSystem:(nullable NSString *)dbSystem
+              block:(NS_NOESCAPE void (^)(void))block;
+
 /** Records a span you timed yourself, under whatever is open on this thread (or the root). */
 - (void)recordSpan:(NSString *)name kind:(NSString *)kind startedAt:(NSDate *)startedAt durationMs:(double)durationMs data:(nullable NSDictionary<NSString *, id> *)data;
+
+/** The same, with a "database" span's SQL and database system, sent as described on -measureSpan:kind:data:statement:dbSystem:block:. */
+- (void)recordSpan:(NSString *)name
+              kind:(NSString *)kind
+         startedAt:(NSDate *)startedAt
+        durationMs:(double)durationMs
+              data:(nullable NSDictionary<NSString *, id> *)data
+         statement:(nullable NSString *)statement
+          dbSystem:(nullable NSString *)dbSystem;
+
+/**
+ * @internal not part of the public API: a span's data with a "database" span's SQL added as
+ * db.statement (masked) and db.system. A db.statement passed in data directly is masked too, so raw
+ * SQL can never go out on a span.
+ */
++ (nullable NSDictionary<NSString *, id> *)spanDataForKind:(NSString *)kind
+                                                       data:(nullable NSDictionary<NSString *, id> *)data
+                                                  statement:(nullable NSString *)statement
+                                                   dbSystem:(nullable NSString *)dbSystem;
 
 /**
  * Starts an http span for one outgoing request and returns it with the request to send:

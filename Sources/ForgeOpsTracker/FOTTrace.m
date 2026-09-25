@@ -1,5 +1,6 @@
 #import "FOTTrace.h"
 #import "FOTRequestSpan.h"
+#import "FOTSqlStatement.h"
 
 static const NSUInteger FOTMaxSpans = 500;
 
@@ -130,6 +131,16 @@ static NSString *FOTNormalizedKind(NSString *kind) {
 }
 
 - (void)measureSpan:(NSString *)name kind:(NSString *)kind data:(NSDictionary<NSString *, id> *)data block:(NS_NOESCAPE void (^)(void))block {
+    [self measureSpan:name kind:kind data:data statement:nil dbSystem:nil block:block];
+}
+
+- (void)measureSpan:(NSString *)name
+               kind:(NSString *)kind
+               data:(NSDictionary<NSString *, id> *)data
+          statement:(NSString *)statement
+           dbSystem:(NSString *)dbSystem
+              block:(NS_NOESCAPE void (^)(void))block {
+    NSDictionary<NSString *, id> *spanData = [FOTTrace spanDataForKind:kind data:data statement:statement dbSystem:dbSystem];
     NSString *spanId = [FOTTrace generateSpanId];
     NSString *parent = [self currentParent];
     NSMutableArray<NSString *> *stack = [self openSpansOnThreadCreating:YES];
@@ -143,12 +154,48 @@ static NSString *FOTNormalizedKind(NSString *kind) {
         double durationMs = (CFAbsoluteTimeGetCurrent() - timer) * 1000.0;
         [FOTTrace popCurrent:self];
         [stack removeObject:spanId];
-        [self storeSpan:[self spanWithId:spanId parent:parent name:name kind:kind startedAt:startedAt durationMs:durationMs data:data]];
+        [self storeSpan:[self spanWithId:spanId parent:parent name:name kind:kind startedAt:startedAt durationMs:durationMs data:spanData]];
     }
 }
 
 - (void)recordSpan:(NSString *)name kind:(NSString *)kind startedAt:(NSDate *)startedAt durationMs:(double)durationMs data:(NSDictionary<NSString *, id> *)data {
-    [self storeSpan:[self spanWithId:[FOTTrace generateSpanId] parent:[self currentParent] name:name kind:kind startedAt:startedAt durationMs:durationMs data:data]];
+    [self recordSpan:name kind:kind startedAt:startedAt durationMs:durationMs data:data statement:nil dbSystem:nil];
+}
+
+- (void)recordSpan:(NSString *)name
+              kind:(NSString *)kind
+         startedAt:(NSDate *)startedAt
+        durationMs:(double)durationMs
+              data:(NSDictionary<NSString *, id> *)data
+         statement:(NSString *)statement
+          dbSystem:(NSString *)dbSystem {
+    NSDictionary<NSString *, id> *spanData = [FOTTrace spanDataForKind:kind data:data statement:statement dbSystem:dbSystem];
+    [self storeSpan:[self spanWithId:[FOTTrace generateSpanId] parent:[self currentParent] name:name kind:kind startedAt:startedAt durationMs:durationMs data:spanData]];
+}
+
++ (NSDictionary<NSString *, id> *)spanDataForKind:(NSString *)kind
+                                              data:(NSDictionary<NSString *, id> *)data
+                                         statement:(NSString *)statement
+                                          dbSystem:(NSString *)dbSystem {
+    if (![kind isEqualToString:@"database"]) {
+        return data;
+    }
+    NSMutableDictionary<NSString *, id> *result = [NSMutableDictionary dictionaryWithDictionary:data ?: @{}];
+    id raw = statement ?: result[@"db.statement"];
+    [result removeObjectForKey:@"db.statement"];
+    NSString *masked = [raw isKindOfClass:[NSString class]] ? [FOTSqlStatement maskedStatement:raw] : nil;
+    if (masked) {
+        result[@"db.statement"] = masked;
+    }
+    id system = dbSystem ?: result[@"db.system"];
+    [result removeObjectForKey:@"db.system"];
+    if ([system isKindOfClass:[NSString class]]) {
+        NSString *trimmed = [system stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (trimmed.length > 0) {
+            result[@"db.system"] = trimmed.lowercaseString;
+        }
+    }
+    return result;
 }
 
 - (void)recordSpanWithId:(NSString *)spanId

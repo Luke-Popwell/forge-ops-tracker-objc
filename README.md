@@ -195,6 +195,26 @@ flushed at exit and an iOS app is suspended shortly after it backgrounds, so cal
 main thread) from `applicationDidEnterBackground:` or before a command-line tool quits. Turn the
 feature off with `config.trackTracing = NO`.
 
+### Database spans with their SQL
+
+A `database` span can carry the SQL it ran (a query against the app's local SQLite database, say)
+and which database it was. Every string and number literal is replaced by `?` before it leaves the
+device (so `WHERE email = 'a@b.co'` is sent as `WHERE email = ?`), the statement is cut at 4000
+characters, and ForgeOps masks it again on arrival. It is sent in the span's data as `db.statement`
+and `db.system`, and ForgeOps shows it on the span. Both are ignored on any other kind.
+
+```objc
+NSString *sql = @"SELECT * FROM messages WHERE thread_id = 42 AND read = 0";
+__block NSArray *messages;
+[trace measureSpan:@"Load messages" kind:@"database" data:nil statement:sql dbSystem:@"sqlite" block:^{
+    messages = [self.database rowsForQuery:sql];
+}];
+// Sent as db.statement "SELECT * FROM messages WHERE thread_id = ? AND read = ?", db.system "sqlite".
+```
+
+`recordSpan:kind:startedAt:durationMs:data:statement:dbSystem:` does the same for a query you timed
+yourself.
+
 ### Connecting app errors to your backend
 
 Trace and span ids use the [W3C Trace Context](https://www.w3.org/TR/trace-context/) format (a 32

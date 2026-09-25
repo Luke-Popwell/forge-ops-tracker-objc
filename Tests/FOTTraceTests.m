@@ -95,6 +95,51 @@
     XCTAssertEqualObjects([self span:@"r" inTrace:trace][@"kind"], @"database");
 }
 
+- (void)testADatabaseSpanSendsItsStatementMaskedAsDbStatementWithDbSystem {
+    [self configureWithThreshold:0.01 tracing:YES];
+
+    [ForgeOpsTracker traceNamed:@"t" block:^(FOTTrace *trace) {
+        [trace measureSpan:@"Load orders"
+                      kind:@"database"
+                      data:@{ @"rows": @3 }
+                 statement:@"SELECT * FROM orders WHERE email = 'a@b.co' AND total > 4200"
+                  dbSystem:@"SQLite"
+                     block:^{
+                         [NSThread sleepForTimeInterval:0.03];
+                     }];
+        [trace recordSpan:@"Count"
+                     kind:@"database"
+                startedAt:[NSDate date]
+               durationMs:1
+                     data:@{ @"db.statement": @"SELECT count(*) FROM carts WHERE token = 'secret-token'" }];
+        [trace recordSpan:@"Not db" kind:@"service" startedAt:[NSDate date] durationMs:1 data:nil statement:@"SELECT 'x'" dbSystem:@"sqlite"];
+    }];
+    [ForgeOpsTracker flushSpans];
+
+    NSDictionary *trace = [self deliveredTrace];
+    XCTAssertEqualObjects([self span:@"Load orders" inTrace:trace][@"data"], (@{
+        @"rows": @3,
+        @"db.statement": @"SELECT * FROM orders WHERE email = ? AND total > ?",
+        @"db.system": @"sqlite",
+    }));
+    XCTAssertEqualObjects([self span:@"Count" inTrace:trace][@"data"], @{ @"db.statement": @"SELECT count(*) FROM carts WHERE token = ?" });
+    XCTAssertEqualObjects([self span:@"Not db" inTrace:trace][@"data"], @{});
+    NSString *wire = self.server.requests.lastObject[@"body"];
+    XCTAssertFalse([wire containsString:@"a@b.co"]);
+    XCTAssertFalse([wire containsString:@"secret-token"]);
+}
+
+- (void)testADatabaseStatementIsCutAt4000Characters {
+    NSMutableString *sql = [NSMutableString stringWithString:@"SELECT "];
+    for (int i = 0; i < 3000; i++) {
+        [sql appendString:@"a, "];
+    }
+    [sql appendString:@"b FROM t"];
+    NSString *statement = [FOTTrace spanDataForKind:@"database" data:nil statement:sql dbSystem:nil][@"db.statement"];
+    XCTAssertEqual(statement.length, (NSUInteger)4003);
+    XCTAssertTrue([statement hasSuffix:@"..."]);
+}
+
 - (void)testABlockThatRaisesStillRecordsItsSpanSendsTheTraceAndRethrowsUnchanged {
     [self configureWithThreshold:0.01 tracing:YES];
 
