@@ -130,6 +130,9 @@ NS_ASSUME_NONNULL_BEGIN
 /** Same derivation again, swapping the trailing "/events" for "/spans". */
 - (nullable NSURL *)spansURL;
 
+/** Same derivation again, swapping the trailing "/events" for "/changes". */
+- (nullable NSURL *)changesURL;
+
 - (BOOL)isEnabled;
 
 /**

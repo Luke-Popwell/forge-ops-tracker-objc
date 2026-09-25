@@ -16,6 +16,18 @@ static FOTPerformanceFlusher *FOTSharedPerformanceFlusher = nil;
 static FOTSpanQueue *FOTSharedSpanQueue = nil;
 static FOTMetricBuffer *FOTSharedMetricBuffer = nil;
 static FOTMetricBuffer *FOTSharedInfrastructureMetricBuffer = nil;
+static FOTClient *FOTSharedChangeClient = nil;
+
+// Serial, so changes are sent in the order they were recorded, and off the caller's thread, since
+// FOTClient's delivery blocks on the network.
+static dispatch_queue_t FOTChangeQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = dispatch_queue_create("com.forgeops.tracker.changes", DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
 
 static void FOTHandleUncaughtException(NSException *exception) {
     // The handler runs on the raising thread, so a trace whose synchronous block raised is still
@@ -299,6 +311,67 @@ static void FOTHandleUncaughtException(NSException *exception) {
     return FOTCurrentUser;
 }
 
++ (void)recordChange:(NSString *)kind title:(NSString *)title {
+    [self recordChange:kind title:title details:nil];
+}
+
++ (void)recordChange:(NSString *)kind title:(NSString *)title details:(NSDictionary<NSString *, id> *)details {
+    [self recordChange:kind title:title details:details environment:nil service:nil actor:nil url:nil identifier:nil occurredAt:nil];
+}
+
++ (void)recordChange:(NSString *)kind
+               title:(NSString *)title
+             details:(NSDictionary<NSString *, id> *)details
+         environment:(NSString *)environment
+             service:(NSString *)service
+               actor:(NSString *)actor
+                 url:(NSString *)url
+          identifier:(NSString *)identifier
+          occurredAt:(NSDate *)occurredAt {
+    @try {
+        FOTConfiguration *config = [self configuration];
+        if (![config isEnabled]) {
+            return;
+        }
+        NSDictionary<NSString *, id> *payload = [FOTChange payloadWithKind:kind
+                                                                     title:title
+                                                                   details:details
+                                                               environment:environment
+                                                                   service:service
+                                                                     actor:actor
+                                                                       url:url
+                                                                identifier:identifier
+                                                                occurredAt:occurredAt
+                                                             configuration:config];
+        if (payload == nil) {
+            NSLog(@"[forge-ops-tracker] dropped a change with no title");
+            return;
+        }
+
+        FOTClient *client;
+        @synchronized(self) {
+            if (FOTSharedChangeClient == nil) {
+                FOTSharedChangeClient = [[FOTClient alloc] initWithConfiguration:config];
+            }
+            client = FOTSharedChangeClient;
+        }
+        dispatch_async(FOTChangeQueue(), ^{
+            @try {
+                [client deliverChange:payload];
+            } @catch (NSException *exception) {
+                NSLog(@"[forge-ops-tracker] change delivery failed: %@", exception.reason);
+            }
+        });
+    } @catch (NSException *exception) {
+        // A change report must never take the app down, whatever the caller passed in.
+        NSLog(@"[forge-ops-tracker] recordChange failed: %@", exception.reason);
+    }
+}
+
++ (void)_waitForChanges {
+    dispatch_sync(FOTChangeQueue(), ^{});
+}
+
 + (void)_resetForTesting {
     FOTSharedConfiguration = nil;
     FOTSharedReporter = nil;
@@ -313,6 +386,10 @@ static void FOTHandleUncaughtException(NSException *exception) {
     [FOTSharedInfrastructureMetricBuffer discard];
     FOTSharedMetricBuffer = nil;
     FOTSharedInfrastructureMetricBuffer = nil;
+    [self _waitForChanges];
+    @synchronized(self) {
+        FOTSharedChangeClient = nil;
+    }
     // Deliberately not touching the real NSUncaughtExceptionHandler/signal dispositions here:
     // resetting those between test runs would risk leaving the *test process itself* without a
     // safety net if a later, unrelated test genuinely crashes.

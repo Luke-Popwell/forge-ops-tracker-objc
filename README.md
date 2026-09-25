@@ -316,6 +316,41 @@ succeeds, since a plan without the feature rejects every flush and would otherwi
 as the process lives. A NaN or infinite value is dropped at capture: `NSJSONSerialization` raises on
 one. Requires a ForgeOps plan that includes custom metrics / infrastructure monitoring.
 
+## Recording changes
+
+When a feature flag flips or a remote config value changes, tell ForgeOps, and it shows the change on
+the timeline next to the errors around it, so "crashes started right after `new_checkout` turned on"
+is one glance instead of an investigation. Call `recordChange:` from your flag or config client's
+change callback:
+
+```objc
+#import <ForgeOpsTracker/ForgeOpsTracker.h>
+
+[ForgeOpsTracker configureWithBlock:^(FOTConfiguration *config) {
+    config.dsn = @"https://<api_key>@getforgeops.net/api/v1/events";
+}];
+
+// Your flag client's change listener: whatever it calls with the key and the old and new values.
+[flagClient onFlagChanged:^(NSString *key, BOOL oldValue, BOOL newValue) {
+    [ForgeOpsTracker recordChange:FOTChangeKindFeatureFlag
+                            title:[NSString stringWithFormat:@"%@ turned %@", key, newValue ? @"on" : @"off"]
+                          details:@{ @"key": key, @"from": @(oldValue), @"to": @(newValue) }];
+}];
+```
+
+`kind` is one of `FOTChangeKindFeatureFlag`, `FOTChangeKindConfig`, `FOTChangeKindMigration`,
+`FOTChangeKindDependency`, `FOTChangeKindInfrastructure`, or `FOTChangeKindOther`; any other string is
+sent as `"other"`. The title is required and cut to 200 characters. The full form,
+`recordChange:title:details:environment:service:actor:url:identifier:occurredAt:`, also takes an
+`environment` (nil means the configured one), `service`, `actor`, `url` (http or https), `identifier`
+(an idempotency key, so recording the same change twice keeps one), and `occurredAt` (nil means now).
+`details` that `NSJSONSerialization` can't encode (a NaN, an `NSDate`) are left out rather than raising.
+
+`recordChange:` returns immediately and sends the change on a private serial queue, off the calling
+thread (the main thread included). It never raises, whether the request fails or your plan doesn't
+include change tracking (that 403 is silent), and it's a no-op when reporting isn't enabled for the
+environment.
+
 ## Delivery model: capture now, upload on next launch
 
 There is deliberately no live, in-process delivery queue here, for a reason specific to crash

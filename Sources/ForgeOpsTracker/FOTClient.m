@@ -36,6 +36,10 @@
     return [self postJSONObject:trace toURL:[_configuration spansURL]];
 }
 
+- (BOOL)deliverChange:(NSDictionary<NSString *, id> *)change {
+    return [self postJSONObject:change toURL:[_configuration changesURL]];
+}
+
 - (BOOL)postJSONObject:(id)payload toURL:(nullable NSURL *)url {
     NSString *apiKey = [_configuration apiKey];
     if (url == nil || apiKey == nil) {

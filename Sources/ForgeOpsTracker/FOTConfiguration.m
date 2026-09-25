@@ -96,6 +96,10 @@
     return [self swapEventsSuffixWith:@"/infrastructure_metrics"];
 }
 
+- (nullable NSURL *)changesURL {
+    return [self swapEventsSuffixWith:@"/changes"];
+}
+
 - (nullable NSURL *)spansURL {
     NSURL *url = [self ingestionURL];
     if (url == nil) {

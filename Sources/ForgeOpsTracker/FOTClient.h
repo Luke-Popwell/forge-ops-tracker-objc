@@ -46,6 +46,12 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (BOOL)deliverSpans:(NSDictionary<NSString *, id> *)trace;
 
+/**
+ * Same delivery contract again, against the DSN's changes endpoint (see FOTConfiguration
+ * -changesURL). A 403 (a plan without change tracking) is just a NO like any other rejection.
+ */
+- (BOOL)deliverChange:(NSDictionary<NSString *, id> *)change;
+
 @end
 
 NS_ASSUME_NONNULL_END

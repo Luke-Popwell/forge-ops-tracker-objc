@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import "FOTChange.h"
 #import "FOTConfiguration.h"
 #import "FOTRequestSpan.h"
 #import "FOTSqlStatement.h"
@@ -178,6 +179,39 @@ NS_ASSUME_NONNULL_BEGIN
  * queue if you'd rather not block the main thread) or before a command-line tool quits.
  */
 + (void)flushMetrics;
+
+/**
+ * Records one change to what the app is running: a feature flag flipped, a remote config value
+ * updated, anything that could explain a shift in crashes or errors. ForgeOps shows it on the
+ * timeline next to the errors around it. kind is one of the FOTChangeKind constants (anything else
+ * is sent as FOTChangeKindOther); title is required and cut to 200 characters. details is a small
+ * JSON-serializable dictionary; environment nil means FOTConfiguration.environment; url must be
+ * http(s); identifier is an idempotency key (the "id" the server dedupes on); occurredAt nil means now.
+ *
+ * Returns immediately: the change is sent on a private serial queue, off the calling thread, and
+ * nothing here ever raises, whether the request fails or the plan doesn't include change tracking.
+ * A no-op when reporting isn't enabled for this environment.
+ *
+ *   [flagClient onFlagChanged:^(NSString *key, BOOL oldValue, BOOL newValue) {
+ *       [ForgeOpsTracker recordChange:FOTChangeKindFeatureFlag
+ *                               title:[NSString stringWithFormat:@"%@ turned %@", key, newValue ? @"on" : @"off"]
+ *                             details:@{ @"key": key, @"from": @(oldValue), @"to": @(newValue) }];
+ *   }];
+ */
++ (void)recordChange:(NSString *)kind title:(NSString *)title;
++ (void)recordChange:(NSString *)kind title:(NSString *)title details:(nullable NSDictionary<NSString *, id> *)details;
++ (void)recordChange:(NSString *)kind
+               title:(NSString *)title
+             details:(nullable NSDictionary<NSString *, id> *)details
+         environment:(nullable NSString *)environment
+             service:(nullable NSString *)service
+               actor:(nullable NSString *)actor
+                 url:(nullable NSString *)url
+          identifier:(nullable NSString *)identifier
+          occurredAt:(nullable NSDate *)occurredAt;
+
+/** @internal not part of the public API: blocks until every change recorded so far has been sent (for tests). */
++ (void)_waitForChanges;
 
 /**
  * Distributed tracing: one flow's own call tree (a screen load, a sign-in, a network round trip and
