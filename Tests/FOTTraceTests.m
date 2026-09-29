@@ -140,6 +140,16 @@
     XCTAssertTrue([statement hasSuffix:@"..."]);
 }
 
+- (void)testAMysqlOrMariadbStatementHasItsDoubleQuotedStringsMaskedToo {
+    NSString *sql = @"SELECT \"a'b\" = 'c' AND token = \"tok-secret\"";
+    NSDictionary *mysql = [FOTTrace spanDataForKind:@"database" data:nil statement:sql dbSystem:@" MySQL "];
+    XCTAssertEqualObjects(mysql, (@{ @"db.statement": @"SELECT ? = ? AND token = ?", @"db.system": @"mysql" }));
+    NSDictionary *maria = [FOTTrace spanDataForKind:@"database" data:@{ @"db.statement": sql, @"db.system": @"MariaDB" } statement:nil dbSystem:nil];
+    XCTAssertEqualObjects(maria[@"db.statement"], @"SELECT ? = ? AND token = ?");
+    NSDictionary *postgres = [FOTTrace spanDataForKind:@"database" data:nil statement:@"SELECT \"user id\" FROM t" dbSystem:@"postgresql"];
+    XCTAssertEqualObjects(postgres[@"db.statement"], @"SELECT \"user id\" FROM t");
+}
+
 - (void)testABlockThatRaisesStillRecordsItsSpanSendsTheTraceAndRethrowsUnchanged {
     [self configureWithThreshold:0.01 tracing:YES];
 

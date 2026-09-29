@@ -14,12 +14,35 @@ static NSRegularExpression *FOTSqlRegex(NSString *pattern, NSRegularExpressionOp
     return regex;
 }
 
+// The server's pattern, piece by piece. ICU's \w and \d also match non-ASCII letters and digits (and
+// \h is whitespace, not hex), so the ASCII classes are spelled out to match it exactly.
+// A string: '' and \' are escaped quotes, one cut off by truncation (even right after a backslash)
+// is masked to the end, and an E/X/N/B/U& prefix goes with it, but only when it isn't the end of a
+// longer word (the quote itself always starts a string, so LIKE'%x%' is still masked, to LIKE?).
+static NSString *const FOTSqlStringPattern = @"(?:(?<![A-Za-z0-9_$])(?:[EeXxNnBb]|[Uu]&))?'(?:[^'\\\\]|\\\\(?:.|\\z)|'')*(?:'|\\z)";
+// MySQL and MariaDB only: "double quoted" is a string there, escaped the same way.
+static NSString *const FOTSqlDoubleQuotedStringPattern = @"\"(?:[^\"\\\\]|\\\\(?:.|\\z)|\"\")*(?:\"|\\z)";
+static NSString *const FOTSqlDollarQuotedPattern = @"(\\$[A-Za-z_]*\\$).*?(?:\\1|\\z)";
+// Integers, decimals (.5 too), exponents, hex and binary, never digits inside an identifier.
+static NSString *const FOTSqlNumberPattern =
+    @"(?<![A-Za-z0-9_$.])(?:0[xX][0-9A-Fa-f]+|0[bB][01]+|(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?)(?![A-Za-z0-9_])";
+
 static NSRegularExpression *FOTSqlLiteral(void) {
     static NSRegularExpression *regex;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        regex = FOTSqlRegex(@"'(?:[^']|'')*(?:'|\\z)|(\\$[A-Za-z_]*\\$).*?(?:\\1|\\z)|(?<![\\w$.])\\d+(?:\\.\\d+)?(?!\\w)",
-                            NSRegularExpressionDotMatchesLineSeparators);
+        NSArray<NSString *> *parts = @[FOTSqlStringPattern, FOTSqlDollarQuotedPattern, FOTSqlNumberPattern];
+        regex = FOTSqlRegex([parts componentsJoinedByString:@"|"], NSRegularExpressionDotMatchesLineSeparators);
+    });
+    return regex;
+}
+
+static NSRegularExpression *FOTSqlLiteralWithDoubleQuotes(void) {
+    static NSRegularExpression *regex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSArray<NSString *> *parts = @[FOTSqlStringPattern, FOTSqlDoubleQuotedStringPattern, FOTSqlDollarQuotedPattern, FOTSqlNumberPattern];
+        regex = FOTSqlRegex([parts componentsJoinedByString:@"|"], NSRegularExpressionDotMatchesLineSeparators);
     });
     return regex;
 }
@@ -152,11 +175,18 @@ static NSString *FOTSqlGroup(NSTextCheckingResult *match, NSUInteger index, NSSt
 }
 
 + (NSString *)maskedStatement:(NSString *)statement {
+    return [self maskedStatement:statement system:nil];
+}
+
++ (NSString *)maskedStatement:(NSString *)statement system:(NSString *)system {
     if (![statement isKindOfClass:[NSString class]] ||
         [statement stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].length == 0) {
         return nil;
     }
-    NSString *masked = [FOTSqlLiteral() stringByReplacingMatchesInString:statement
+    NSString *lowercaseSystem = [system isKindOfClass:[NSString class]] ? system.lowercaseString : nil;
+    BOOL doubleQuotedStrings = [@[@"mysql", @"mariadb"] containsObject:lowercaseSystem ?: @""];
+    NSRegularExpression *pattern = doubleQuotedStrings ? FOTSqlLiteralWithDoubleQuotes() : FOTSqlLiteral();
+    NSString *masked = [pattern stringByReplacingMatchesInString:statement
                                                                   options:0
                                                                     range:NSMakeRange(0, statement.length)
                                                              withTemplate:@"?"];

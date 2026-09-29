@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0 (2026-09-29)
+
+- SQL masking now catches values it used to let through, matching ForgeOps's own masker again: a string with a backslash-escaped quote (`'o\'brien'`, `E'o\'brien'`) is masked whole instead of leaving the rest of it visible, a string's type prefix goes with it (`E''`, `X''`, `N''`, `B''` and `U&''` each become one `?`), and hex (`0x1F`), binary (`0b101`), exponent (`3e10`, `1.5E-3`) and leading-dot (`.5`) numbers are masked. On a `database` span whose `dbSystem` is `mysql` or `mariadb`, "double quoted" text is a string and is masked too; on any other database it's a name and is still left alone. New `+[FOTSqlStatement maskedStatement:system:]` is that system-aware masker; `maskedStatement:` masks as it does with a nil system. Digits and letters next to a value are now judged by ASCII only, the way the server does, so a number right after an accented letter is masked the same on both sides.
+
 ## 0.6.0 (2026-09-25)
 
 - A `database` span can now carry the SQL it ran, such as a local SQLite query: new `-[FOTTrace measureSpan:kind:data:statement:dbSystem:block:]` and `-[FOTTrace recordSpan:kind:startedAt:durationMs:data:statement:dbSystem:]`. The statement is masked on the device (every string and number literal becomes `?`), cut at 4000 characters, and sent in the span's data as `db.statement`, with `db.system` lowercased. A `db.statement` put in `data` directly is masked the same way. Both are ignored on spans of any other kind.

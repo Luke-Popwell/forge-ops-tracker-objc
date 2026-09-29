@@ -53,6 +53,52 @@
     XCTAssertNil([FOTSqlStatement maskedStatement:nil]);
 }
 
+// The shared masking corpus: the same cases, with the same expected output, are checked in every
+// SDK and against the server's SqlStatementMasker. Each case is input, system (NSNull for none),
+// expected.
+static NSArray<NSArray *> *FOTSqlMaskCorpus(void) {
+    return @[
+        @[@"SELECT * FROM orders WHERE email = 'a@b.co' AND id = 42 LIMIT 10", [NSNull null], @"SELECT * FROM orders WHERE email = ? AND id = ? LIMIT ?"],
+        @[@"EXEC sp_note @text = 'it''s broken'", [NSNull null], @"EXEC sp_note @text = ?"],
+        @[@"SELECT 1 WHERE name = 'unterminated", [NSNull null], @"SELECT ? WHERE name = ?"],
+        @[@"DO $body$ BEGIN PERFORM 1; END $body$", [NSNull null], @"DO ?"],
+        @[@"SELECT \"user id\" FROM orders2 WHERE id = $1 AND v = sp_v2(?)", [NSNull null], @"SELECT \"user id\" FROM orders2 WHERE id = $1 AND v = sp_v2(?)"],
+        @[@"SELECT price * 1.5 FROM t", [NSNull null], @"SELECT price * ? FROM t"],
+        @[@"SELECT * FROM users WHERE name = E'o\\'brien' AND id = 1", [NSNull null], @"SELECT * FROM users WHERE name = ? AND id = ?"],
+        @[@"SELECT * FROM users WHERE name = 'o\\'brien' AND id = 1", [NSNull null], @"SELECT * FROM users WHERE name = ? AND id = ?"],
+        @[@"SELECT * FROM t WHERE b = X'DEADBEEF' AND s = N'uni' AND u = U&'d\\0061t' AND e = e'x'", [NSNull null], @"SELECT * FROM t WHERE b = ? AND s = ? AND u = ? AND e = ?"],
+        @[@"SELECT * FROM t WHERE a LIKE'%secret%'", [NSNull null], @"SELECT * FROM t WHERE a LIKE?"],
+        @[@"SELECT * FROM t WHERE f = 0x1F AND b = 0b101 AND n = 3e10 AND m = 1.5E-3 AND k = .5", [NSNull null], @"SELECT * FROM t WHERE f = ? AND b = ? AND n = ? AND m = ? AND k = ?"],
+        @[@"SELECT e, t.col, 1e5e FROM t", [NSNull null], @"SELECT e, t.col, 1e5e FROM t"],
+        @[@"SELECT \"user id\" FROM t WHERE token = \"abc123secret\"", @"mysql", @"SELECT ? FROM t WHERE token = ?"],
+        @[@"SELECT \"user id\" FROM t WHERE token = \"abc123secret\"", @"MariaDB", @"SELECT ? FROM t WHERE token = ?"],
+        @[@"SELECT \"user id\" FROM t WHERE token = \"abc123secret\"", @"postgresql", @"SELECT \"user id\" FROM t WHERE token = \"abc123secret\""],
+        @[@"SELECT \"user id\" FROM t WHERE token = \"abc123secret\"", [NSNull null], @"SELECT \"user id\" FROM t WHERE token = \"abc123secret\""],
+        @[@"SELECT * FROM t WHERE a = 'x' AND b = 9", [NSNull null], @"SELECT * FROM t WHERE a = ? AND b = ?"],
+        @[@"SELECT * FROM t WHERE a = ? AND b = ?", [NSNull null], @"SELECT * FROM t WHERE a = ? AND b = ?"],
+        @[@"SELECT * FROM t WHERE path = 'C:\\\\dir\\\\' AND n = 5", [NSNull null], @"SELECT * FROM t WHERE path = ? AND n = ?"],
+        @[@"INSERT INTO t (a, b) VALUES (-5, +3.25e+2)", [NSNull null], @"INSERT INTO t (a, b) VALUES (-?, +?)"],
+        @[@"SELECT * FROM t WHERE a = 'secret\\", [NSNull null], @"SELECT * FROM t WHERE a = ?"],
+        @[@"SELECT * FROM t WHERE a = \"secret\\", @"mysql", @"SELECT * FROM t WHERE a = ?"],
+    ];
+}
+
+- (void)testMasksTheSharedCorpusExactlyLikeTheServer {
+    for (NSArray *testCase in FOTSqlMaskCorpus()) {
+        NSString *input = testCase[0];
+        NSString *system = testCase[1] == [NSNull null] ? nil : testCase[1];
+        NSString *expected = testCase[2];
+        XCTAssertEqualObjects([FOTSqlStatement maskedStatement:input system:system], expected, @"%@ (%@)", input, system);
+        XCTAssertEqualObjects([FOTSqlStatement maskedStatement:expected system:system], expected, @"%@ (%@)", expected, system);
+    }
+}
+
+- (void)testMaskedStatementWithoutASystemLeavesDoubleQuotesAlone {
+    XCTAssertEqualObjects([FOTSqlStatement maskedStatement:@"SELECT \"a\" FROM t"], @"SELECT \"a\" FROM t");
+    XCTAssertEqualObjects([FOTSqlStatement maskedStatement:@"SELECT \"a\" FROM t" system:@"MYSQL"], @"SELECT ? FROM t");
+    XCTAssertNil([FOTSqlStatement maskedStatement:@" " system:@"mysql"]);
+}
+
 - (void)testFindsAStoredProcedureWithItsSchema {
     NSDictionary *found = [FOTSqlStatement objectsInMaskedStatement:@"EXEC dbo.sp_refund_order @id = ?"];
     XCTAssertEqualObjects(found, (@{ @"operation": @"EXEC", @"procedures": @[@"dbo.sp_refund_order"], @"relations": @[] }));

@@ -181,19 +181,23 @@ static NSString *FOTNormalizedKind(NSString *kind) {
         return data;
     }
     NSMutableDictionary<NSString *, id> *result = [NSMutableDictionary dictionaryWithDictionary:data ?: @{}];
-    id raw = statement ?: result[@"db.statement"];
-    [result removeObjectForKey:@"db.statement"];
-    NSString *masked = [raw isKindOfClass:[NSString class]] ? [FOTSqlStatement maskedStatement:raw] : nil;
-    if (masked) {
-        result[@"db.statement"] = masked;
-    }
     id system = dbSystem ?: result[@"db.system"];
     [result removeObjectForKey:@"db.system"];
+    NSString *normalizedSystem = nil;
     if ([system isKindOfClass:[NSString class]]) {
         NSString *trimmed = [system stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (trimmed.length > 0) {
-            result[@"db.system"] = trimmed.lowercaseString;
+            normalizedSystem = trimmed.lowercaseString;
+            result[@"db.system"] = normalizedSystem;
         }
+    }
+    // Masked for the db.system that goes out with it, so a MySQL or MariaDB statement's "double
+    // quoted" strings are masked too.
+    id raw = statement ?: result[@"db.statement"];
+    [result removeObjectForKey:@"db.statement"];
+    NSString *masked = [raw isKindOfClass:[NSString class]] ? [FOTSqlStatement maskedStatement:raw system:normalizedSystem] : nil;
+    if (masked) {
+        result[@"db.statement"] = masked;
     }
     return result;
 }

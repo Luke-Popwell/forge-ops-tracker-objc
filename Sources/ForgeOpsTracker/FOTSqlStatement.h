@@ -35,8 +35,14 @@ extern NSString *const FOTSqlStatementKey;
 + (nullable NSString *)statementInException:(NSException *)exception;
 
 /** Replaces every string literal and number with "?", truncated to 4000 characters; nil for a
- * blank statement. */
+ * blank statement. "double quoted" text is left alone, since in SQL it's an identifier (a column
+ * named "user id"), not a value. */
 + (nullable NSString *)maskedStatement:(nullable NSString *)statement;
+
+/** maskedStatement: for a statement from a known database: `system` is its db.system, or nil when
+ * unknown. For "mysql" or "mariadb" (any case), where "double quoted" text is a string, that's
+ * masked too; any other value masks exactly as maskedStatement: does. */
++ (nullable NSString *)maskedStatement:(nullable NSString *)statement system:(nullable NSString *)system;
 
 /** Takes an already-masked statement and returns @{@"operation": ..., @"procedures": @[...],
  * @"relations": @[...]}, or nil when nothing recognizable was found. A view and a table are

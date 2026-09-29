@@ -213,7 +213,11 @@ __block NSArray *messages;
 ```
 
 `recordSpan:kind:startedAt:durationMs:data:statement:dbSystem:` does the same for a query you timed
-yourself.
+yourself. Strings with backslash escapes (`'o\'brien'`) or a type prefix (`E''`, `X''`, `N''`, `B''`,
+`U&''`) and hex, binary and exponent numbers (`0x1F`, `0b101`, `1.5E-3`) are masked too, and with
+`dbSystem` `@"mysql"` or `@"mariadb"` so is "double quoted" text, a string there; on any other
+database it's a name and is left alone. `+[FOTSqlStatement maskedStatement:system:]` is the masker
+itself, to see what a statement becomes.
 
 ### Connecting app errors to your backend
 
