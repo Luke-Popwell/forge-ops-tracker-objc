@@ -97,4 +97,35 @@
     XCTAssertEqual([store pendingPayloadURLs].count, (NSUInteger)1, @"a failed delivery must not delete the pending file");
 }
 
+- (void)testUploadPendingReportsLeavesAFileInPlaceOnA5xxOrA429 {
+    FOTConfiguration *config = [self enabledConfiguration];
+    FOTReporter *reporter = [[FOTReporter alloc] initWithConfiguration:config];
+    FOTCrashStore *store = [[FOTCrashStore alloc] initWithConfiguration:config];
+    [reporter reportException:[NSException exceptionWithName:@"FOTTestException" reason:@"boom" userInfo:nil] context:nil];
+
+    for (NSString *path in @[ @"/unavailable", @"/rate_limited" ]) {
+        config.dsn = [NSString stringWithFormat:@"http://key@127.0.0.1:%lu%@", (unsigned long)self.server.port, path];
+        [reporter uploadPendingReports];
+        XCTAssertEqual([store pendingPayloadURLs].count, (NSUInteger)1, @"%@", path);
+    }
+    XCTAssertEqual(self.server.requests.count, (NSUInteger)2);
+}
+
+- (void)testUploadPendingReportsDeletesAReportTheServerRejectsAndNeverSendsItAgain {
+    FOTConfiguration *config = [self enabledConfiguration];
+    config.dsn = [NSString stringWithFormat:@"http://key@127.0.0.1:%lu/unauthorized", (unsigned long)self.server.port]; // answers 401
+    FOTReporter *reporter = [[FOTReporter alloc] initWithConfiguration:config];
+    FOTCrashStore *store = [[FOTCrashStore alloc] initWithConfiguration:config];
+    [reporter reportException:[NSException exceptionWithName:@"First" reason:@"boom" userInfo:nil] context:nil];
+    [reporter reportException:[NSException exceptionWithName:@"Second" reason:@"boom" userInfo:nil] context:nil];
+
+    [reporter uploadPendingReports];
+
+    XCTAssertEqual([store pendingPayloadURLs].count, (NSUInteger)0, @"a rejected report must not be kept");
+    XCTAssertEqual(self.server.requests.count, (NSUInteger)2, @"a rejected report must not hold up the one behind it");
+
+    [reporter uploadPendingReports];
+    XCTAssertEqual(self.server.requests.count, (NSUInteger)2);
+}
+
 @end

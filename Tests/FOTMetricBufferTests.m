@@ -108,6 +108,98 @@
     XCTAssertEqualObjects(delivered, (@[ @[ @"a" ], @[ @"a", @"b" ] ]));
 }
 
+- (FOTMetricBuffer *)bufferWithConfiguration:(FOTConfiguration *)config statusOfDeliver:(NSInteger (^)(NSArray *))statusOfDeliver {
+    FOTMetricBuffer *buffer = [[FOTMetricBuffer alloc] initWithConfiguration:config statusOfDeliver:statusOfDeliver interval:^NSTimeInterval { return config.metricFlushInterval; }];
+    [self.buffers addObject:buffer];
+    return buffer;
+}
+
+- (void)testARejectedBatchIsDroppedAndNeverSentAgain {
+    NSMutableArray *delivered = [NSMutableArray array];
+    FOTMetricBuffer *buffer = [self bufferWithConfiguration:[self configuration] statusOfDeliver:^NSInteger(NSArray *entries) {
+        [delivered addObject:[self names:entries]];
+        return 403;
+    }];
+
+    [buffer record:@{ @"metric_name": @"a", @"value": @1 }];
+    [buffer flush];
+    XCTAssertEqual([buffer count], (NSUInteger)0);
+    [buffer flush]; // nothing left: no second delivery
+    [buffer record:@{ @"metric_name": @"b", @"value": @2 }];
+    [buffer flush];
+
+    XCTAssertEqualObjects(delivered, (@[ @[ @"a" ], @[ @"b" ] ]));
+}
+
+- (void)testA5xxA408A429OrNoResponseKeepsEveryEntry {
+    NSArray<NSNumber *> *statuses = @[ @500, @503, @408, @429, @0 ];
+    for (NSNumber *status in statuses) {
+        FOTMetricBuffer *buffer = [self bufferWithConfiguration:[self configuration] statusOfDeliver:^NSInteger(NSArray *entries) { return status.integerValue; }];
+        [buffer record:@{ @"metric_name": @"a", @"value": @1 }];
+        [buffer flush];
+        XCTAssertEqual([buffer count], (NSUInteger)1, @"status %@", status);
+    }
+}
+
+- (void)testTheFifthFailedFlushInARowDropsTheBatch {
+    __block int calls = 0;
+    FOTMetricBuffer *buffer = [self bufferWithConfiguration:[self configuration] statusOfDeliver:^NSInteger(NSArray *entries) {
+        calls += 1;
+        return 503;
+    }];
+
+    [buffer record:@{ @"metric_name": @"a", @"value": @1 }];
+    for (int i = 0; i < 4; i++) {
+        [buffer flush];
+    }
+    XCTAssertEqual([buffer count], (NSUInteger)1);
+
+    [buffer flush];
+    XCTAssertEqual([buffer count], (NSUInteger)0);
+    XCTAssertEqual(calls, 5);
+
+    // The count starts again with the next batch.
+    [buffer record:@{ @"metric_name": @"b", @"value": @2 }];
+    [buffer flush];
+    XCTAssertEqual([buffer count], (NSUInteger)1);
+}
+
+- (void)testAnEntryRecordedWhileARejectedDeliveryIsInFlightOutlivesTheDroppedBatch {
+    FOTMetricBuffer *buffer = [self bufferWithConfiguration:[self configuration] statusOfDeliver:^NSInteger(NSArray *entries) { return 422; }];
+    [buffer record:@{ @"metric_name": @"first", @"value": @1 }];
+    __weak FOTMetricBuffer *weakBuffer = buffer;
+    buffer.beforeDeliveryHook = ^{
+        weakBuffer.beforeDeliveryHook = nil;
+        [weakBuffer record:@{ @"metric_name": @"during", @"value": @2 }];
+    };
+
+    [buffer flush];
+
+    XCTAssertEqual([buffer count], (NSUInteger)1);
+}
+
+- (void)testCaptureMetricDropsABatchTheServerRejectsAndKeepsOneItCouldNotTakeYet {
+    FOTConfiguration *config = [ForgeOpsTracker configureWithBlock:^(FOTConfiguration *config) {
+        config.dsn = [NSString stringWithFormat:@"http://key@127.0.0.1:%lu/unauthorized", (unsigned long)self.server.port];
+        config.enabledEnvironments = [NSSet setWithObject:@"production"];
+        config.environment = @"production";
+        config.crashReportsDirectory = self.tempDirectory;
+        config.metricFlushInterval = 3600;
+        config.infrastructureMetricFlushInterval = 3600;
+    }];
+
+    [ForgeOpsTracker captureMetric:@"signup"];
+    [ForgeOpsTracker flushMetrics]; // 401: dropped
+    [ForgeOpsTracker flushMetrics]; // nothing left to send
+    XCTAssertEqual(self.server.requests.count, (NSUInteger)1);
+
+    config.dsn = [NSString stringWithFormat:@"http://key@127.0.0.1:%lu/unavailable", (unsigned long)self.server.port];
+    [ForgeOpsTracker captureMetric:@"payment"];
+    [ForgeOpsTracker flushMetrics]; // 503: kept
+    [ForgeOpsTracker flushMetrics]; // and sent again
+    XCTAssertEqual(self.server.requests.count, (NSUInteger)3);
+}
+
 - (void)testAnEntryRecordedWhileDeliveryIsInFlightIsNeverLost {
     NSMutableArray *delivered = [NSMutableArray array];
     FOTMetricBuffer *buffer = [self bufferWithConfiguration:[self configuration] deliver:^BOOL(NSArray *entries) { [delivered addObject:[self names:entries]]; return YES; }];

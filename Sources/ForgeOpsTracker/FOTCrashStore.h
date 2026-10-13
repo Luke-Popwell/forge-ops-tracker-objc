@@ -12,6 +12,14 @@ NS_ASSUME_NONNULL_BEGIN
  * named by a UUID so concurrent writes (unlikely, but not impossible if multiple threads crash
  * near-simultaneously) never collide.
  */
+/**
+ * The most pending reports kept on disk, and the longest one is kept (in seconds): a report that
+ * keeps failing to upload (see FOTReporter -uploadPendingReports) must not pile up or be retried
+ * for good.
+ */
+FOUNDATION_EXPORT const NSUInteger FOTCrashStoreMaxPendingPayloads;
+FOUNDATION_EXPORT const NSTimeInterval FOTCrashStoreMaxPendingPayloadAge;
+
 @interface FOTCrashStore : NSObject
 
 - (instancetype)initWithConfiguration:(FOTConfiguration *)configuration NS_DESIGNATED_INITIALIZER;
@@ -20,7 +28,11 @@ NS_ASSUME_NONNULL_BEGIN
 /** Writes payload to disk synchronously. Returns NO (and never throws) if the write fails for any reason. */
 - (BOOL)writePayload:(NSDictionary<NSString *, id> *)payload;
 
-/** The file URL of every pending payload currently on disk, oldest first. */
+/**
+ * The file URL of every pending payload currently on disk, oldest first. Anything older than
+ * FOTCrashStoreMaxPendingPayloadAge, and the oldest beyond FOTCrashStoreMaxPendingPayloads, is
+ * deleted here first.
+ */
 - (NSArray<NSURL *> *)pendingPayloadURLs;
 
 - (nullable NSDictionary<NSString *, id> *)payloadAtURL:(NSURL *)url;

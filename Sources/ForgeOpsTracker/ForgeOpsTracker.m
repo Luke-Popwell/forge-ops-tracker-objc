@@ -94,10 +94,10 @@ static void FOTHandleUncaughtException(NSException *exception) {
             FOTConfiguration *config = [self configuration];
             FOTClient *client = [[FOTClient alloc] initWithConfiguration:config];
             FOTSharedMetricBuffer = [[FOTMetricBuffer alloc] initWithConfiguration:config
-                                                                           deliver:^BOOL(NSArray *entries) { return [client deliverMetrics:entries]; }
+                                                                           statusOfDeliver:^NSInteger(NSArray *entries) { return [client statusOfDeliveringMetrics:entries]; }
                                                                           interval:^NSTimeInterval { return config.metricFlushInterval; }];
             FOTSharedInfrastructureMetricBuffer = [[FOTMetricBuffer alloc] initWithConfiguration:config
-                                                                                          deliver:^BOOL(NSArray *entries) { return [client deliverInfrastructureMetrics:entries]; }
+                                                                                          statusOfDeliver:^NSInteger(NSArray *entries) { return [client statusOfDeliveringInfrastructureMetrics:entries]; }
                                                                                          interval:^NSTimeInterval { return config.infrastructureMetricFlushInterval; }];
         }
     }

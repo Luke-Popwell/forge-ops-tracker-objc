@@ -93,10 +93,20 @@
                 [_crashStore deletePayloadAtURL:url];
                 continue;
             }
-            if ([_client deliver:payload]) {
-                [_crashStore deletePayloadAtURL:url];
+            NSInteger status = [_client statusOfDelivering:payload];
+            switch (FOTDeliveryOutcomeForStatus(status)) {
+                case FOTDeliveryOutcomeDelivered:
+                    [_crashStore deletePayloadAtURL:url];
+                    break;
+                case FOTDeliveryOutcomeRejected:
+                    // The server will never take this one: delete rather than retry forever.
+                    [_crashStore deletePayloadAtURL:url];
+                    NSLog(@"[forge-ops-tracker] dropped a crash report: %@", FOTDeliveryDropReasonForStatus(status));
+                    break;
+                case FOTDeliveryOutcomeFailed:
+                    // Leave it in place; the next launch's uploadPendingReports retries it.
+                    break;
             }
-            // On failure, leave it in place; the next launch's uploadPendingReports retries it.
         }
     } @catch (NSException *uploadFailure) {
         NSLog(@"[forge-ops-tracker] uploadPendingReports failed: %@", uploadFailure);

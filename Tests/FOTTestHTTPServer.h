@@ -8,7 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
  * background thread within the test process itself, since that's cheap and needs no extra
  * tooling beyond what's already linked (Foundation + libc). Every accepted request is parsed
  * (method, path, headers, body) and recorded for the test to assert against; responds 401 for
- * /unauthorized, 202 otherwise.
+ * /unauthorized, 429 for /rate_limited, 503 for /unavailable, 202 otherwise.
  */
 @interface FOTTestHTTPServer : NSObject
 

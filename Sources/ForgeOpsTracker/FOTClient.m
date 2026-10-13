@@ -1,5 +1,25 @@
 #import "FOTClient.h"
 
+FOTDeliveryOutcome FOTDeliveryOutcomeForStatus(NSInteger status) {
+    if (status >= 200 && status < 300) {
+        return FOTDeliveryOutcomeDelivered;
+    }
+    if (status >= 400 && status < 500 && status != 408 && status != 429) {
+        return FOTDeliveryOutcomeRejected;
+    }
+    return FOTDeliveryOutcomeFailed;
+}
+
+NSString *FOTDeliveryDropReasonForStatus(NSInteger status) {
+    if (FOTDeliveryOutcomeForStatus(status) == FOTDeliveryOutcomeRejected) {
+        return [NSString stringWithFormat:@"rejected by the server (HTTP %ld)", (long)status];
+    }
+    if (status == 0) {
+        return @"the server could not be reached";
+    }
+    return [NSString stringWithFormat:@"the server answered HTTP %ld", (long)status];
+}
+
 @implementation FOTClient {
     FOTConfiguration *_configuration;
     NSURLSession *_session;
@@ -17,39 +37,56 @@
 }
 
 - (BOOL)deliver:(NSDictionary<NSString *, id> *)payload {
-    return [self postJSONObject:payload toURL:[_configuration ingestionURL]];
+    return FOTDeliveryOutcomeForStatus([self statusOfDelivering:payload]) == FOTDeliveryOutcomeDelivered;
 }
 
 - (BOOL)deliverPerformanceSamples:(NSArray<NSDictionary<NSString *, id> *> *)samples {
-    return [self postJSONObject:@{ @"samples": samples } toURL:[_configuration performanceSamplesURL]];
+    return FOTDeliveryOutcomeForStatus([self statusOfDeliveringPerformanceSamples:samples]) == FOTDeliveryOutcomeDelivered;
 }
 
 - (BOOL)deliverMetrics:(NSArray<NSDictionary<NSString *, id> *> *)entries {
-    return [self postJSONObject:@{ @"metrics": entries } toURL:[_configuration customMetricsURL]];
+    return FOTDeliveryOutcomeForStatus([self statusOfDeliveringMetrics:entries]) == FOTDeliveryOutcomeDelivered;
 }
 
 - (BOOL)deliverInfrastructureMetrics:(NSArray<NSDictionary<NSString *, id> *> *)entries {
-    return [self postJSONObject:@{ @"metrics": entries } toURL:[_configuration infrastructureMetricsURL]];
+    return FOTDeliveryOutcomeForStatus([self statusOfDeliveringInfrastructureMetrics:entries]) == FOTDeliveryOutcomeDelivered;
 }
 
 - (BOOL)deliverSpans:(NSDictionary<NSString *, id> *)trace {
-    return [self postJSONObject:trace toURL:[_configuration spansURL]];
+    return FOTDeliveryOutcomeForStatus([self postJSONObject:trace toURL:[_configuration spansURL]]) == FOTDeliveryOutcomeDelivered;
 }
 
 - (BOOL)deliverChange:(NSDictionary<NSString *, id> *)change {
-    return [self postJSONObject:change toURL:[_configuration changesURL]];
+    return FOTDeliveryOutcomeForStatus([self postJSONObject:change toURL:[_configuration changesURL]]) == FOTDeliveryOutcomeDelivered;
 }
 
-- (BOOL)postJSONObject:(id)payload toURL:(nullable NSURL *)url {
+- (NSInteger)statusOfDelivering:(NSDictionary<NSString *, id> *)payload {
+    return [self postJSONObject:payload toURL:[_configuration ingestionURL]];
+}
+
+- (NSInteger)statusOfDeliveringPerformanceSamples:(NSArray<NSDictionary<NSString *, id> *> *)samples {
+    return [self postJSONObject:@{ @"samples": samples } toURL:[_configuration performanceSamplesURL]];
+}
+
+- (NSInteger)statusOfDeliveringMetrics:(NSArray<NSDictionary<NSString *, id> *> *)entries {
+    return [self postJSONObject:@{ @"metrics": entries } toURL:[_configuration customMetricsURL]];
+}
+
+- (NSInteger)statusOfDeliveringInfrastructureMetrics:(NSArray<NSDictionary<NSString *, id> *> *)entries {
+    return [self postJSONObject:@{ @"metrics": entries } toURL:[_configuration infrastructureMetricsURL]];
+}
+
+// The HTTP status of the response, or 0 when there was none (no DSN, a network error, a timeout).
+- (NSInteger)postJSONObject:(id)payload toURL:(nullable NSURL *)url {
     NSString *apiKey = [_configuration apiKey];
     if (url == nil || apiKey == nil) {
-        return NO;
+        return 0;
     }
 
     NSError *jsonError = nil;
     NSData *body = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&jsonError];
     if (body == nil) {
-        return NO;
+        return 0;
     }
 
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
@@ -58,14 +95,13 @@
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     request.HTTPBody = body;
 
-    __block BOOL success = NO;
+    __block NSInteger status = 0;
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
     NSURLSessionDataTask *task = [_session dataTaskWithRequest:request
                                               completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error == nil && [response isKindOfClass:[NSHTTPURLResponse class]]) {
-            NSInteger status = ((NSHTTPURLResponse *)response).statusCode;
-            success = (status >= 200 && status < 300);
+            status = ((NSHTTPURLResponse *)response).statusCode;
         }
         dispatch_semaphore_signal(semaphore);
     }];
@@ -77,7 +113,7 @@
     // still calls the completion handler.
     dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)((_configuration.timeout + 1.0) * NSEC_PER_SEC)));
 
-    return success;
+    return status;
 }
 
 @end

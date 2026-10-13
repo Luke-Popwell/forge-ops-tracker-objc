@@ -4,6 +4,24 @@
 NS_ASSUME_NONNULL_BEGIN
 
 /**
+ * What became of one delivery attempt. Rejected is a 4xx other than 408 and 429: the server will
+ * never take this payload, so whoever holds it lets it go instead of sending it again. Failed is
+ * everything that may work later (no DSN, a network error, a timeout, a 5xx, 408, 429), so the
+ * payload is kept and retried, within the bounds each caller sets.
+ */
+typedef NS_ENUM(NSInteger, FOTDeliveryOutcome) {
+    FOTDeliveryOutcomeDelivered,
+    FOTDeliveryOutcomeRejected,
+    FOTDeliveryOutcomeFailed,
+};
+
+/** The outcome an HTTP status stands for; 0 is no response at all. */
+FOUNDATION_EXPORT FOTDeliveryOutcome FOTDeliveryOutcomeForStatus(NSInteger status);
+
+/** @internal Why a payload with this status was let go, for the one log line that says so. */
+FOUNDATION_EXPORT NSString *FOTDeliveryDropReasonForStatus(NSInteger status);
+
+/**
  * Delivers one payload over HTTP. Every failure mode: DNS, connection, timeout, a non-2xx
  * response: is caught here and turned into a NO return rather than a thrown exception, since a
  * broken or unreachable tracker must never be able to break the host app. Uses NSURLSession, not
@@ -51,6 +69,17 @@ NS_ASSUME_NONNULL_BEGIN
  * -changesURL). A 403 (a plan without change tracking) is just a NO like any other rejection.
  */
 - (BOOL)deliverChange:(NSDictionary<NSString *, id> *)change;
+
+/**
+ * The same requests as -deliver:, -deliverPerformanceSamples:, -deliverMetrics: and
+ * -deliverInfrastructureMetrics:, returning the HTTP status instead (0 when there was no response),
+ * for the callers inside this SDK that hold on to a payload and so need to know whether a failure
+ * is final (see FOTDeliveryOutcomeForStatus), not only that it happened. Never raises.
+ */
+- (NSInteger)statusOfDelivering:(NSDictionary<NSString *, id> *)payload;
+- (NSInteger)statusOfDeliveringPerformanceSamples:(NSArray<NSDictionary<NSString *, id> *> *)samples;
+- (NSInteger)statusOfDeliveringMetrics:(NSArray<NSDictionary<NSString *, id> *> *)entries;
+- (NSInteger)statusOfDeliveringInfrastructureMetrics:(NSArray<NSDictionary<NSString *, id> *> *)entries;
 
 @end
 

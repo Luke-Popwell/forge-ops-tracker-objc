@@ -1,24 +1,36 @@
 #import "FOTMetricBuffer.h"
 
 const NSUInteger FOTMetricBufferMaxEntries = 1000;
+const NSUInteger FOTMetricBufferMaxConsecutiveFailures = 5;
 
 @implementation FOTMetricBuffer {
     FOTConfiguration *_configuration;
-    BOOL (^_deliver)(NSArray<NSDictionary<NSString *, id> *> *);
+    NSInteger (^_statusOfDeliver)(NSArray<NSDictionary<NSString *, id> *> *);
     NSTimeInterval (^_interval)(void);
     NSLock *_lock;
     NSMutableArray<NSDictionary<NSString *, id> *> *_entries;
     dispatch_queue_t _queue;
     dispatch_source_t _timer;
+    NSUInteger _consecutiveFailures;
 }
 
 - (instancetype)initWithConfiguration:(FOTConfiguration *)configuration
                               deliver:(BOOL (^)(NSArray<NSDictionary<NSString *, id> *> *))deliver
                              interval:(NSTimeInterval (^)(void))interval {
+    BOOL (^deliverCopy)(NSArray<NSDictionary<NSString *, id> *> *) = [deliver copy];
+    // A plain YES/NO can't say why, so a NO is "no response": kept, and counted toward the cap.
+    return [self initWithConfiguration:configuration
+                       statusOfDeliver:^NSInteger(NSArray<NSDictionary<NSString *, id> *> *entries) { return deliverCopy(entries) ? 200 : 0; }
+                              interval:interval];
+}
+
+- (instancetype)initWithConfiguration:(FOTConfiguration *)configuration
+                      statusOfDeliver:(NSInteger (^)(NSArray<NSDictionary<NSString *, id> *> *))statusOfDeliver
+                             interval:(NSTimeInterval (^)(void))interval {
     self = [super init];
     if (self) {
         _configuration = configuration;
-        _deliver = [deliver copy];
+        _statusOfDeliver = [statusOfDeliver copy];
         _interval = [interval copy];
         _lock = [[NSLock alloc] init];
         _entries = [NSMutableArray array];
@@ -117,12 +129,28 @@ const NSUInteger FOTMetricBufferMaxEntries = 1000;
         hook();
     }
 
-    if (!_deliver(snapshot)) {
-        return;
-    }
+    NSInteger status = _statusOfDeliver(snapshot);
 
     [_lock lock];
-    // Exactly the entries just delivered: anything recorded while the request was in flight sits
+    switch (FOTDeliveryOutcomeForStatus(status)) {
+        case FOTDeliveryOutcomeDelivered:
+            _consecutiveFailures = 0;
+            break;
+        case FOTDeliveryOutcomeRejected:
+            _consecutiveFailures = 0;
+            NSLog(@"[forge-ops-tracker] dropped %lu metrics: %@", (unsigned long)snapshot.count, FOTDeliveryDropReasonForStatus(status));
+            break;
+        case FOTDeliveryOutcomeFailed:
+            _consecutiveFailures += 1;
+            if (_consecutiveFailures < FOTMetricBufferMaxConsecutiveFailures) {
+                [_lock unlock];
+                return;
+            }
+            _consecutiveFailures = 0;
+            NSLog(@"[forge-ops-tracker] dropped %lu metrics after %lu failed flushes in a row: %@", (unsigned long)snapshot.count, (unsigned long)FOTMetricBufferMaxConsecutiveFailures, FOTDeliveryDropReasonForStatus(status));
+            break;
+    }
+    // Exactly the entries just delivered or dropped: anything recorded while the request was in flight sits
     // after them and stays for the next flush.
     [_entries removeObjectsInRange:NSMakeRange(0, MIN(snapshot.count, _entries.count))];
     [_lock unlock];
@@ -133,6 +161,7 @@ const NSUInteger FOTMetricBufferMaxEntries = 1000;
     dispatch_source_t timer = _timer;
     _timer = nil;
     [_entries removeAllObjects];
+    _consecutiveFailures = 0;
     [_lock unlock];
     if (timer != nil) {
         dispatch_source_cancel(timer);

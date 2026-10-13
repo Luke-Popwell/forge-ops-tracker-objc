@@ -130,7 +130,14 @@
     [_requests addObject:@{ @"method": method, @"path": path, @"headers": headers, @"body": body }];
     [_lock unlock];
 
-    NSString *status = [path isEqualToString:@"/unauthorized"] ? @"401 Unauthorized" : @"202 Accepted";
+    NSString *status = @"202 Accepted";
+    if ([path isEqualToString:@"/unauthorized"]) {
+        status = @"401 Unauthorized";
+    } else if ([path isEqualToString:@"/rate_limited"]) {
+        status = @"429 Too Many Requests";
+    } else if ([path isEqualToString:@"/unavailable"]) {
+        status = @"503 Service Unavailable";
+    }
     NSString *response = [NSString stringWithFormat:@"HTTP/1.1 %@\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", status];
     NSData *responseData = [response dataUsingEncoding:NSUTF8StringEncoding];
     write(clientFD, responseData.bytes, responseData.length);

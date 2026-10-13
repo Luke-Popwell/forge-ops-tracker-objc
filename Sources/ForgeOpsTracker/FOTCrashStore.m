@@ -1,5 +1,8 @@
 #import "FOTCrashStore.h"
 
+const NSUInteger FOTCrashStoreMaxPendingPayloads = 20;
+const NSTimeInterval FOTCrashStoreMaxPendingPayloadAge = 7 * 24 * 60 * 60;
+
 @implementation FOTCrashStore {
     FOTConfiguration *_configuration;
 }
@@ -53,7 +56,7 @@
             return [url.pathExtension isEqualToString:@"json"] || [url.pathExtension isEqualToString:@"txt"];
         }]];
 
-    return [reportFiles sortedArrayUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
+    NSArray<NSURL *> *sorted = [reportFiles sortedArrayUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
         NSDate *dateA = nil;
         NSDate *dateB = nil;
         [a getResourceValue:&dateA forKey:NSURLCreationDateKey error:nil];
@@ -63,6 +66,38 @@
         }
         return [dateA compare:dateB];
     }];
+    return [self prune:sorted];
+}
+
+// A file whose creation date can't be read is never counted as too old, only toward the cap.
+- (NSArray<NSURL *> *)prune:(NSArray<NSURL *> *)sorted {
+    NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-FOTCrashStoreMaxPendingPayloadAge];
+    NSMutableArray<NSURL *> *kept = [NSMutableArray arrayWithCapacity:sorted.count];
+    NSUInteger expired = 0;
+    for (NSURL *url in sorted) {
+        NSDate *created = nil;
+        [url getResourceValue:&created forKey:NSURLCreationDateKey error:nil];
+        if (created != nil && [created compare:cutoff] == NSOrderedAscending) {
+            [self deletePayloadAtURL:url];
+            expired += 1;
+        } else {
+            [kept addObject:url];
+        }
+    }
+
+    NSUInteger excess = kept.count > FOTCrashStoreMaxPendingPayloads ? kept.count - FOTCrashStoreMaxPendingPayloads : 0;
+    for (NSUInteger i = 0; i < excess; i++) {
+        [self deletePayloadAtURL:kept[i]];
+    }
+    [kept removeObjectsInRange:NSMakeRange(0, excess)];
+
+    if (expired > 0) {
+        NSLog(@"[forge-ops-tracker] dropped %lu crash reports older than 7 days that could not be delivered", (unsigned long)expired);
+    }
+    if (excess > 0) {
+        NSLog(@"[forge-ops-tracker] dropped the %lu oldest crash reports: more than %lu were waiting to be delivered", (unsigned long)excess, (unsigned long)FOTCrashStoreMaxPendingPayloads);
+    }
+    return kept;
 }
 
 - (nullable NSDictionary<NSString *, id> *)payloadAtURL:(NSURL *)url {

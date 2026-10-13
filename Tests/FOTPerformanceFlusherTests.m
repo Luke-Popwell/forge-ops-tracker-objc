@@ -117,9 +117,9 @@
 }
 
 - (void)testAFailedDeliveryKeepsEveryBucketSoTheNextFlushCarriesMore {
-    // /unauthorized answers 401 (and does not end in /events, so the URL is left as-is): a failed
-    // delivery. Pointing the DSN at the normal path afterward is the retry that succeeds.
-    FOTConfiguration *config = [self configurationWithPath:@"/unauthorized"];
+    // /unavailable answers 503 (and does not end in /events, so the URL is left as-is): a delivery
+    // that failed for now. Pointing the DSN at the normal path afterward is the retry that succeeds.
+    FOTConfiguration *config = [self configurationWithPath:@"/unavailable"];
     FOTPerformanceFlusher *flusher = [self flusherForConfiguration:config];
     [flusher recordTransaction:@"GET /x" durationMs:10];
 
@@ -132,6 +132,78 @@
 
     XCTAssertEqualObjects([self lastRequestBody][@"samples"][0][@"request_count"], @2);
     XCTAssertNil([flusher tallyForTransaction:@"GET /x"]);
+}
+
+- (void)testARejectedDeliveryDropsTheBatchAndNeverSendsItAgain {
+    // /unauthorized answers 401: the server will never take this batch.
+    FOTConfiguration *config = [self configurationWithPath:@"/unauthorized"];
+    FOTPerformanceFlusher *flusher = [self flusherForConfiguration:config];
+    [flusher recordTransaction:@"GET /x" durationMs:10];
+
+    [flusher flush];
+    XCTAssertNil([flusher tallyForTransaction:@"GET /x"]);
+
+    [flusher flush]; // nothing left: no second request
+    XCTAssertEqual(self.server.requests.count, (NSUInteger)1);
+
+    config.dsn = [NSString stringWithFormat:@"http://key@127.0.0.1:%lu/api/v1/events", (unsigned long)self.server.port];
+    [flusher recordTransaction:@"GET /y" durationMs:20];
+    [flusher flush];
+
+    NSArray *samples = [self lastRequestBody][@"samples"];
+    XCTAssertEqual(samples.count, (NSUInteger)1);
+    XCTAssertEqualObjects(samples[0][@"transaction_name"], @"GET /y");
+}
+
+- (void)testAnUnreachableServerOrA429KeepsEveryBucket {
+    FOTConfiguration *config = [self configurationWithPath:@"/rate_limited"];
+    FOTPerformanceFlusher *flusher = [self flusherForConfiguration:config];
+    [flusher recordTransaction:@"GET /x" durationMs:10];
+
+    [flusher flush];
+    XCTAssertEqualObjects([flusher tallyForTransaction:@"GET /x"][@"count"], @1);
+
+    config.dsn = @"http://key@127.0.0.1:1/api/v1/events"; // nothing listening there
+    config.timeout = 0.5;
+    [flusher flush];
+    XCTAssertEqualObjects([flusher tallyForTransaction:@"GET /x"][@"count"], @1);
+}
+
+- (void)testTheFifthFailedFlushInARowDropsTheBatch {
+    FOTPerformanceFlusher *flusher = [self flusherForConfiguration:[self configurationWithPath:@"/unavailable"]];
+    [flusher recordTransaction:@"GET /x" durationMs:10];
+
+    for (int i = 0; i < 4; i++) {
+        [flusher flush];
+    }
+    XCTAssertEqualObjects([flusher tallyForTransaction:@"GET /x"][@"count"], @1);
+
+    [flusher flush];
+    XCTAssertNil([flusher tallyForTransaction:@"GET /x"]);
+    XCTAssertEqual(self.server.requests.count, (NSUInteger)5);
+
+    [flusher flush]; // nothing left: no sixth request
+    XCTAssertEqual(self.server.requests.count, (NSUInteger)5);
+}
+
+- (void)testASuccessfulFlushStartsTheFailureCountAgain {
+    FOTConfiguration *config = [self configurationWithPath:@"/unavailable"];
+    FOTPerformanceFlusher *flusher = [self flusherForConfiguration:config];
+    [flusher recordTransaction:@"GET /x" durationMs:10];
+    for (int i = 0; i < 4; i++) {
+        [flusher flush];
+    }
+
+    config.dsn = [NSString stringWithFormat:@"http://key@127.0.0.1:%lu/api/v1/events", (unsigned long)self.server.port];
+    [flusher flush];
+    XCTAssertNil([flusher tallyForTransaction:@"GET /x"]);
+
+    config.dsn = [NSString stringWithFormat:@"http://key@127.0.0.1:%lu/unavailable", (unsigned long)self.server.port];
+    [flusher recordTransaction:@"GET /y" durationMs:10];
+    for (int i = 0; i < 4; i++) {
+        [flusher flush];
+    }
+    XCTAssertEqualObjects([flusher tallyForTransaction:@"GET /y"][@"count"], @1);
 }
 
 - (void)testARecordThatLandsDuringDeliveryIsNeverLost {
@@ -170,7 +242,7 @@
 }
 
 - (void)testKeepsHistogramCountsForTheNextFlushWhenDeliveryFails {
-    FOTConfiguration *config = [self configurationWithPath:@"/unauthorized"]; // answers 401: a failed delivery
+    FOTConfiguration *config = [self configurationWithPath:@"/unavailable"]; // answers 503: a delivery that failed for now
     FOTPerformanceFlusher *flusher = [self flusherForConfiguration:config];
     [flusher recordTransaction:@"GET /posts" durationMs:10];
     [flusher flush];

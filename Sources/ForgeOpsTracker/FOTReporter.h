@@ -41,8 +41,10 @@ NS_ASSUME_NONNULL_BEGIN
              breadcrumbs:(nullable NSArray<NSDictionary<NSString *, id> *> *)breadcrumbs;
 
 /**
- * Uploads every pending crash report left over from a previous launch, deleting each on success
- * and leaving a failed one in place for the next attempt. Deliberately synchronous: call this
+ * Uploads every pending crash report left over from a previous launch, deleting each on success,
+ * and each one the server rejects (a 4xx other than 408 and 429: sending it again could never
+ * work). One that failed for now (a network error, a timeout, a 5xx, 408 or 429) is left in place
+ * for the next attempt, within the count and age FOTCrashStore keeps. Deliberately synchronous: call this
  * from a background queue at startup, not the main thread.
  */
 /** The same as the above, plus the raw SQL statement behind the exception (nil to look for it on the

@@ -1,6 +1,8 @@
 #import "FOTPerformanceFlusher.h"
 #import "FOTHistogramBucketer.h"
 
+const NSUInteger FOTPerformanceFlusherMaxConsecutiveFailures = 5;
+
 @interface FOTPerformanceBucket : NSObject
 @property (nonatomic) NSUInteger count;
 @property (nonatomic) double durationSumMs;
@@ -27,6 +29,7 @@
     NSDate *_periodStartedAt;
     dispatch_queue_t _queue;
     dispatch_source_t _timer;
+    NSUInteger _consecutiveFailures;
 }
 
 - (instancetype)initWithConfiguration:(FOTConfiguration *)configuration client:(FOTClient *)client {
@@ -152,11 +155,27 @@
         }];
     }];
 
-    if (![_client deliverPerformanceSamples:samples]) {
-        return;
-    }
+    NSInteger status = [_client statusOfDeliveringPerformanceSamples:samples];
 
     [_lock lock];
+    switch (FOTDeliveryOutcomeForStatus(status)) {
+        case FOTDeliveryOutcomeDelivered:
+            _consecutiveFailures = 0;
+            break;
+        case FOTDeliveryOutcomeRejected:
+            _consecutiveFailures = 0;
+            NSLog(@"[forge-ops-tracker] dropped %lu performance samples: %@", (unsigned long)samples.count, FOTDeliveryDropReasonForStatus(status));
+            break;
+        case FOTDeliveryOutcomeFailed:
+            _consecutiveFailures += 1;
+            if (_consecutiveFailures < FOTPerformanceFlusherMaxConsecutiveFailures) {
+                [_lock unlock];
+                return;
+            }
+            _consecutiveFailures = 0;
+            NSLog(@"[forge-ops-tracker] dropped %lu performance samples after %lu failed flushes in a row: %@", (unsigned long)samples.count, (unsigned long)FOTPerformanceFlusherMaxConsecutiveFailures, FOTDeliveryDropReasonForStatus(status));
+            break;
+    }
     [snapshot enumerateKeysAndObjectsUsingBlock:^(NSString *name, FOTPerformanceBucket *sent, BOOL *stop) {
         FOTPerformanceBucket *current = self->_buckets[name];
         if (current == nil) {
@@ -190,6 +209,7 @@
     dispatch_source_t timer = _timer;
     _timer = nil;
     [_buckets removeAllObjects];
+    _consecutiveFailures = 0;
     [_lock unlock];
     if (timer != nil) {
         dispatch_source_cancel(timer);

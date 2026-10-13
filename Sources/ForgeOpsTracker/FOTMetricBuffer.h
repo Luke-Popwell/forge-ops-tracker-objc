@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import "FOTClient.h"
 #import "FOTConfiguration.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -13,16 +14,19 @@ NS_ASSUME_NONNULL_BEGIN
  * class twice; here it is one class instantiated twice, told which delivery block and flush interval
  * to use.
  *
- * Three deliberate differences from the Ruby buffers:
+ * Four deliberate differences from the Ruby buffers:
  *
  *  - A flush snapshots the first N entries and, on success, removes exactly those N, instead of
  *    resetting the whole list, so an entry recorded while the request is in flight (the lock is
  *    released around the network call) is kept for the next flush rather than lost.
  *  - The buffer is capped at FOTMetricBufferMaxEntries, and once full further entries are dropped
- *    until a flush succeeds: a plan without the feature answers 403 on every flush, and an uncapped
- *    buffer would then grow for as long as the process lives. Dropping the newest rather than the
- *    oldest keeps the entries a flush is delivering at the front of the array, which is what makes
- *    removing exactly them afterward exact.
+ *    until a flush succeeds or lets its batch go: an unreachable server fails every flush, and an
+ *    uncapped buffer would then grow for as long as the process lives. Dropping the newest rather
+ *    than the oldest keeps the entries a flush is delivering at the front of the array, which is
+ *    what makes removing exactly them afterward exact.
+ *  - A batch is not retried without end. One the server rejects (a 4xx other than 408 and 429, such
+ *    as the 403 a plan without the feature answers) is dropped at once, and one that has failed
+ *    FOTMetricBufferMaxConsecutiveFailures flushes in a row is dropped too, each with a log line.
  *  - A NaN or infinite value is dropped at record time: NSJSONSerialization raises an exception for
  *    one, and one bad entry would make every batch behind it fail to send.
  *
@@ -32,18 +36,29 @@ NS_ASSUME_NONNULL_BEGIN
  */
 FOUNDATION_EXPORT const NSUInteger FOTMetricBufferMaxEntries;
 
+/** A batch that has failed this many flushes in a row is dropped rather than carried further. */
+FOUNDATION_EXPORT const NSUInteger FOTMetricBufferMaxConsecutiveFailures;
+
 @interface FOTMetricBuffer : NSObject
 
-/** deliver takes a batch and returns whether delivery succeeded; interval is read on every arm of the timer. */
+/**
+ * deliver takes a batch and returns whether delivery succeeded; interval is read on every arm of the timer.
+ * A NO is a failure that may work later: the batch is kept, up to FOTMetricBufferMaxConsecutiveFailures flushes.
+ */
 - (instancetype)initWithConfiguration:(FOTConfiguration *)configuration
                               deliver:(BOOL (^)(NSArray<NSDictionary<NSString *, id> *> *entries))deliver
+                             interval:(NSTimeInterval (^)(void))interval;
+
+/** The same, for a deliver that returns the HTTP status (0 for no response), so a rejected batch can be told from a failed one. */
+- (instancetype)initWithConfiguration:(FOTConfiguration *)configuration
+                      statusOfDeliver:(NSInteger (^)(NSArray<NSDictionary<NSString *, id> *> *entries))statusOfDeliver
                              interval:(NSTimeInterval (^)(void))interval NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
 /** Adds one entry (everything but recorded_at, which is stamped here). Returns whether it was kept. */
 - (BOOL)record:(NSDictionary<NSString *, id> *)entry;
 
-/** Delivers everything buffered so far as one batch (synchronously: blocks the calling thread on the network). A failed delivery keeps every entry. */
+/** Delivers everything buffered so far as one batch (synchronously: blocks the calling thread on the network). A delivery that failed for now keeps every entry; a rejected batch, or one that has failed FOTMetricBufferMaxConsecutiveFailures flushes in a row, is dropped. */
 - (void)flush;
 
 /** Cancels the timer and drops every entry without delivering anything. */

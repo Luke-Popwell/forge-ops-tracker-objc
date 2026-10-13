@@ -19,6 +19,9 @@ NS_ASSUME_NONNULL_BEGIN
  * quit should call ForgeOpsTracker +flushPerformance itself (see README.md). Nothing is flushed at
  * exit: an iOS app has no normal exit to hook.
  */
+/** A batch that has failed this many flushes in a row is dropped rather than carried further. */
+FOUNDATION_EXPORT const NSUInteger FOTPerformanceFlusherMaxConsecutiveFailures;
+
 @interface FOTPerformanceFlusher : NSObject
 
 - (instancetype)initWithConfiguration:(FOTConfiguration *)configuration client:(FOTClient *)client NS_DESIGNATED_INITIALIZER;
@@ -29,11 +32,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 /**
  * Snapshots the buffered buckets and delivers them as one batch (synchronously: blocks the calling
- * thread on the network). A failed delivery keeps every bucket where it is, so the next flush's
- * batch just grows instead of losing what was already tallied: there's no other copy of this data
- * anywhere.
+ * thread on the network). A delivery that failed for now (a network error, a timeout, a 5xx, 408 or
+ * 429) keeps every bucket where it is, so the next flush's batch just grows instead of losing what
+ * was already tallied: there's no other copy of this data anywhere. That is bounded: the batch is
+ * dropped when the server rejects it (any other 4xx, which no retry can fix) or once
+ * FOTPerformanceFlusherMaxConsecutiveFailures flushes in a row have failed, and a log line says so.
  *
- * Only exactly what this snapshot delivered is removed afterward, subtracted from whatever is in
+ * Only exactly what this snapshot delivered (or dropped) is removed afterward, subtracted from whatever is in
  * each bucket by then, never the whole set cleared outright. -recordTransaction:durationMs: can run
  * on another thread while delivery is in flight (the lock is deliberately released around the
  * network call), so a record for a transaction already in the snapshot, or a brand-new one, can
