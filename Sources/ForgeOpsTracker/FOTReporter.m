@@ -3,6 +3,7 @@
 #import "FOTCrashStore.h"
 #import "FOTEventBuilder.h"
 #import "FOTSignalHandler.h"
+#import "FOTStrictPrivacy.h"
 #import "ForgeOpsTracker.h"
 
 @interface FOTReporter ()
@@ -92,6 +93,12 @@
                 // Unreadable/corrupt file: delete rather than retry forever.
                 [_crashStore deletePayloadAtURL:url];
                 continue;
+            }
+            // A raw signal report is only completed here, and a report written before strict privacy
+            // was turned on still holds its text: both are reduced on the way out. A report already
+            // reduced when it was built comes through unchanged.
+            if (_configuration.strictPrivacy) {
+                payload = [FOTStrictPrivacy event:payload allowedFields:_configuration.privacyAllowedFields];
             }
             NSInteger status = [_client statusOfDelivering:payload];
             switch (FOTDeliveryOutcomeForStatus(status)) {

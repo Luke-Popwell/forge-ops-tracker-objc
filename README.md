@@ -462,6 +462,48 @@ there and the statement is never stored for that project, whatever this flag say
 still kept. A view and a table are written the same way in SQL, so both show as tables/views; the
 database's own error message usually settles which it was.
 
+## Strict privacy
+
+For apps that can't let personal or health data (PII, PHI) leave the device. With strict privacy
+on, this client sends only structured facts about an error, never free text that could hold a name,
+an email or a diagnosis:
+
+```objc
+[ForgeOpsTracker configureWithBlock:^(FOTConfiguration *config) {
+    config.strictPrivacy = YES;                           // default NO
+    config.privacyAllowedFields = @[ @"error_code", @"feature" ]; // default empty
+}];
+```
+
+- **No message.** A `message_fingerprint` (32 hex characters, a one-way hash of the message with its
+  numbers, hex ids and UUIDs taken out, computed on the device after PII scrubbing) is sent instead,
+  so errors still group. Nothing about the text can be read back from it.
+- **Context and tags** keep only the top-level keys listed in `privacyAllowedFields`, and only when
+  the value is a string, number or boolean. With nothing left they're left out.
+- **User** is sent as its `id` only (as a string), never `email` or `username`.
+- **No breadcrumbs**: `addBreadcrumb:` records nothing, so none are written to disk either.
+- **No SQL statement**, even with `captureSqlStatement` on; the table, view and procedure names in
+  `sql_objects` are kept. No source context (this client never sends any anyway).
+- **Spans**: an outbound HTTP span's name is its method and host only (`GET api.example.com`), a span
+  named by a request path loses its ids (`GET /patients/42` becomes `GET /patients/:id`, and
+  `/patients/42` becomes `/patients/:id`), and span data keeps only `db.statement` (already masked)
+  and `db.system`. The address is read by hand, never by a URL parser, so one a parser would reject
+  still loses its path. Names that aren't addresses (`OrdersController#create`, `SELECT orders`) are
+  kept.
+- **Performance samples**: a transaction name passed to `recordPerformance:durationMs:` or
+  `measureTransaction:block:` is reduced the same way before it's tallied, so a route
+  (`GET /users/:id`) is kept and a raw path loses its ids; raw paths that differ only in ids share one
+  sample.
+- A crash report written to disk before strict privacy was turned on is reduced the same way when it
+  uploads.
+
+The exception class, frames, release, environment, server name, trace id and timings are sent as
+before. With `strictPrivacy` off (the default), nothing changes. This client has no
+environment-based configuration, so both options are set in code.
+
+ForgeOps applies the same rules again on arrival when the project's own Strict privacy setting is
+on, so an app still running an older version of this client can't get text stored for that project.
+
 ## Running the tests
 
 This is a library meant to be dropped into a host app's own Xcode project, not an app itself, so

@@ -1,5 +1,6 @@
 #import "FOTPerformanceFlusher.h"
 #import "FOTHistogramBucketer.h"
+#import "FOTStrictPrivacy.h"
 
 const NSUInteger FOTPerformanceFlusherMaxConsecutiveFailures = 5;
 
@@ -49,6 +50,9 @@ const NSUInteger FOTPerformanceFlusherMaxConsecutiveFailures = 5;
     if (!_configuration.trackPerformance || ![_configuration isEnabled]) {
         return;
     }
+    // Reduced before tallying, not at flush, so two raw paths that differ only in ids
+    // ("/patients/41", "/patients/42") share one sample instead of sending two with the same name.
+    transactionName = [self bucketNameFor:transactionName];
 
     [_lock lock];
     FOTPerformanceBucket *bucket = _buckets[transactionName];
@@ -216,7 +220,14 @@ const NSUInteger FOTPerformanceFlusherMaxConsecutiveFailures = 5;
     }
 }
 
+// The name a transaction is tallied and sent under: as given, or under strict privacy reduced by
+// +[FOTStrictPrivacy transactionName:] (a route is kept, a raw path loses its ids).
+- (NSString *)bucketNameFor:(NSString *)transactionName {
+    return _configuration.strictPrivacy ? [FOTStrictPrivacy transactionName:transactionName] : transactionName;
+}
+
 - (NSDictionary<NSString *, NSNumber *> *)tallyForTransaction:(NSString *)transactionName {
+    transactionName = [self bucketNameFor:transactionName];
     [_lock lock];
     FOTPerformanceBucket *bucket = _buckets[transactionName];
     NSDictionary<NSString *, NSNumber *> *tally = bucket == nil ? nil : @{

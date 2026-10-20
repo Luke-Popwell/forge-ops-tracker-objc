@@ -313,4 +313,31 @@
     XCTAssertNil(config.performanceSamplesURL);
 }
 
+- (void)testStrictPrivacyReducesARawPathTransactionNameAndKeepsARoute {
+    FOTConfiguration *config = [self configurationWithPath:@"/api/v1/events"];
+    config.strictPrivacy = YES;
+    FOTPerformanceFlusher *flusher = [self flusherForConfiguration:config];
+    [flusher recordTransaction:@"GET /patients/41" durationMs:10];
+    [flusher recordTransaction:@"GET /patients/42" durationMs:30];
+    [flusher recordTransaction:@"PatientsController#show" durationMs:5];
+
+    [flusher flush];
+
+    NSMutableDictionary *counts = [NSMutableDictionary dictionary];
+    for (NSDictionary *sample in [self lastRequestBody][@"samples"]) {
+        counts[sample[@"transaction_name"]] = sample[@"request_count"];
+    }
+    // The two raw paths share one sample under their reduced name: no id is ever sent.
+    XCTAssertEqualObjects(counts, (@{ @"GET /patients/:id": @2, @"PatientsController#show": @1 }));
+}
+
+- (void)testWithStrictPrivacyOffATransactionNameIsSentAsGiven {
+    FOTPerformanceFlusher *flusher = [self flusherForConfiguration:[self configurationWithPath:@"/api/v1/events"]];
+    [flusher recordTransaction:@"GET /patients/42" durationMs:10];
+
+    [flusher flush];
+
+    XCTAssertEqualObjects([self lastRequestBody][@"samples"][0][@"transaction_name"], @"GET /patients/42");
+}
+
 @end

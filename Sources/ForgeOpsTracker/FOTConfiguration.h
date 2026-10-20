@@ -109,6 +109,22 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) NSTimeInterval metricFlushInterval;
 @property (nonatomic, assign) NSTimeInterval infrastructureMetricFlushInterval;
 
+/**
+ * Strict privacy, for apps that can't let personal or health data leave the device: every payload
+ * carries only structured facts (error class, frames, release, environment, timings), never free
+ * text. No message (a message_fingerprint is sent instead, so errors still group), no breadcrumbs
+ * (none are recorded either), no SQL statement or source context, the user's id only, and outbound
+ * HTTP span names reduced to method and host. Defaults to NO, which leaves every payload exactly as
+ * it was. See FOTStrictPrivacy.h for the rules and sdks/STRICT_PRIVACY.md for the shared spec.
+ */
+@property (nonatomic, assign) BOOL strictPrivacy;
+
+/**
+ * With strictPrivacy on, the top-level context and tag keys still sent, and only when their value is
+ * a string, number or boolean (such as your own error codes). Empty by default: no context or tags.
+ */
+@property (nonatomic, copy) NSArray<NSString *> *privacyAllowedFields;
+
 /** Where pending (not-yet-uploaded) crash reports are written: see FOTCrashStore. */
 @property (nonatomic, copy) NSString *crashReportsDirectory;
 

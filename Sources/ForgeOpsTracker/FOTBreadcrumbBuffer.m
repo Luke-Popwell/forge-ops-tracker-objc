@@ -32,7 +32,8 @@
                          category:(NSString *)category
                             level:(NSString *)level
                              data:(NSDictionary<NSString *, id> *)data {
-    if (!_configuration.trackBreadcrumbs) {
+    // Under strict privacy a breadcrumb is never sent, so it isn't recorded (or persisted) either.
+    if (!_configuration.trackBreadcrumbs || _configuration.strictPrivacy) {
         return;
     }
 

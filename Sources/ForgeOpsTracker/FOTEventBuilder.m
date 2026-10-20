@@ -1,6 +1,7 @@
 #import "FOTEventBuilder.h"
 #import "FOTSqlStatement.h"
 #import "FOTPiiScrubber.h"
+#import "FOTStrictPrivacy.h"
 
 static const NSUInteger FOTMaxFrames = 500;
 
@@ -122,7 +123,13 @@ static NSRegularExpression *FOTFrameRegex(void) {
         if (traceId != nil) {
             withExtras[@"trace_id"] = traceId;
         }
-        return withExtras;
+        scrubbed = withExtras;
+    }
+
+    // Last, so the fingerprint is of the message exactly as it would otherwise have been sent (after
+    // PII scrubbing), and before the payload is written to disk, so the text never lands there.
+    if (_configuration.strictPrivacy) {
+        return [FOTStrictPrivacy event:scrubbed allowedFields:_configuration.privacyAllowedFields];
     }
     return scrubbed;
 }

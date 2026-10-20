@@ -23,6 +23,8 @@
         _infrastructureMetricFlushInterval = 60.0;
         _traceCaptureThreshold = 1.0;
         _propagateTraces = YES;
+        _strictPrivacy = NO;
+        _privacyAllowedFields = @[];
 
         NSArray<NSString *> *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
         NSString *base = caches.firstObject ?: NSTemporaryDirectory();
