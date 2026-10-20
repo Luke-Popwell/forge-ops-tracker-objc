@@ -277,7 +277,7 @@ static NSString *FOTNormalizedKind(NSString *kind) {
     [all addObject:[self spanWithId:_rootSpanId parent:nil name:_name kind:@"controller" startedAt:_startedAt durationMs:durationMs data:nil]];
     [all addObjectsFromArray:spans];
     // Every span, the root included: a root named after a raw request path ("GET /patients/42")
-    // loses its ids the same way an outbound call loses its path, and span data keeps only the
+    // keeps only its first segment, the same way an outbound call loses its path, and span data keeps only the
     // masked statement and database system.
     if (_configuration.strictPrivacy) {
         for (NSUInteger i = 0; i < all.count; i++) {

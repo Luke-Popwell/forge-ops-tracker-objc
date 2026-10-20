@@ -320,6 +320,7 @@
     [flusher recordTransaction:@"GET /patients/41" durationMs:10];
     [flusher recordTransaction:@"GET /patients/42" durationMs:30];
     [flusher recordTransaction:@"PatientsController#show" durationMs:5];
+    [flusher recordTransaction:@"GET /visits/:id" durationMs:5];
 
     [flusher flush];
 
@@ -328,7 +329,7 @@
         counts[sample[@"transaction_name"]] = sample[@"request_count"];
     }
     // The two raw paths share one sample under their reduced name: no id is ever sent.
-    XCTAssertEqualObjects(counts, (@{ @"GET /patients/:id": @2, @"PatientsController#show": @1 }));
+    XCTAssertEqualObjects(counts, (@{ @"GET /patients/:path": @2, @"PatientsController#show": @1, @"GET /visits/:id": @1 }));
 }
 
 - (void)testWithStrictPrivacyOffATransactionNameIsSentAsGiven {

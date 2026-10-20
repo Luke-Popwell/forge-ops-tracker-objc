@@ -221,7 +221,7 @@ const NSUInteger FOTPerformanceFlusherMaxConsecutiveFailures = 5;
 }
 
 // The name a transaction is tallied and sent under: as given, or under strict privacy reduced by
-// +[FOTStrictPrivacy transactionName:] (a route is kept, a raw path loses its ids).
+// +[FOTStrictPrivacy transactionName:] (a route is kept, a raw path keeps only its first segment).
 - (NSString *)bucketNameFor:(NSString *)transactionName {
     return _configuration.strictPrivacy ? [FOTStrictPrivacy transactionName:transactionName] : transactionName;
 }

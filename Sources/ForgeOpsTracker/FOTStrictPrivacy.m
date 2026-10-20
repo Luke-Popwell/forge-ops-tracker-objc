@@ -108,29 +108,53 @@ static BOOL FOTIsBoolean(id value) {
     return hex;
 }
 
-+ (NSString *)pathWithoutIds:(NSString *)path {
+// ":id", "{id}", "<int:id>", "[slug]" or "*path": a parameter with a name (anything after "*"), and
+// no newline in it, the same as the server's ".".
+static BOOL FOTIsRouteParameter(NSString *segment) {
+    if (segment.length == 0 || [segment rangeOfString:@"\n"].location != NSNotFound) {
+        return NO;
+    }
+    unichar first = [segment characterAtIndex:0];
+    unichar last = [segment characterAtIndex:segment.length - 1];
+    if (first == '*') {
+        return YES;
+    }
+    if (first == ':') {
+        return segment.length >= 2;
+    }
+    return segment.length >= 3 && ((first == '{' && last == '}') || (first == '<' && last == '>') || (first == '[' && last == ']'));
+}
+
++ (NSString *)strictPath:(NSString *)path {
     NSString *text = [path isKindOfClass:[NSString class]] ? path : @"";
     NSRange cut = [text rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"?#"]];
     if (cut.location != NSNotFound) {
         text = [text substringToIndex:cut.location];
     }
 
-    NSMutableArray<NSString *> *segments = [[text componentsSeparatedByString:@"/"] mutableCopy];
-    // Ruby's split drops trailing empty segments, so "/" and "/a/" end up as "" and "/a".
-    while (segments.count > 0 && segments.lastObject.length == 0) {
-        [segments removeLastObject];
-    }
-    NSCharacterSet *digits = [NSCharacterSet characterSetWithCharactersInString:@"0123456789"];
-    for (NSUInteger i = 0; i < segments.count; i++) {
-        NSString *segment = segments[i];
-        // Length in characters (code points), not UTF-16 units, the same as the server counts it.
-        NSUInteger length = [segment lengthOfBytesUsingEncoding:NSUTF32LittleEndianStringEncoding] / 4;
-        if ([segment rangeOfCharacterFromSet:digits].location != NSNotFound || length > FOTMaxPathSegmentLength) {
-            segments[i] = @":id";
+    NSArray<NSString *> *all = [text componentsSeparatedByString:@"/"];
+    // A route template is kept whole: its words are a developer's, its parameters placeholders.
+    for (NSString *segment in all) {
+        if (FOTIsRouteParameter(segment)) {
+            return text;
         }
     }
-    NSString *joined = [segments componentsJoinedByString:@"/"];
-    return joined.length > 0 ? joined : @"/";
+
+    // A raw path keeps only its first segment: anything after it can name a person.
+    NSArray<NSString *> *segments = [all filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
+    if (segments.count == 0) {
+        return @"/";
+    }
+    NSString *first = segments[0];
+    // Length in characters (code points), not UTF-16 units, the same as the server counts it.
+    NSUInteger length = [first lengthOfBytesUsingEncoding:NSUTF32LittleEndianStringEncoding] / 4;
+    NSCharacterSet *digits = [NSCharacterSet characterSetWithCharactersInString:@"0123456789"];
+    BOOL isId = [first rangeOfCharacterFromSet:digits].location != NSNotFound || length > FOTMaxPathSegmentLength;
+    return [NSString stringWithFormat:@"%@%@%@", [text hasPrefix:@"/"] ? @"/" : @"", isId ? @":id" : first, segments.count > 1 ? @"/:path" : @""];
+}
+
++ (NSString *)pathWithoutIds:(NSString *)path {
+    return [self strictPath:path];
 }
 
 + (NSString *)spanName:(NSString *)name {
@@ -138,7 +162,7 @@ static BOOL FOTIsBoolean(id value) {
         return name;
     }
     if ([name hasPrefix:@"/"]) {
-        return [self pathWithoutIds:name]; // a span named by a raw path
+        return [self strictPath:name]; // a span named by a path
     }
     NSTextCheckingResult *match = [FOTHttpMethodRegex() firstMatchInString:name options:0 range:NSMakeRange(0, name.length)];
     if (match == nil) {
@@ -147,9 +171,9 @@ static BOOL FOTIsBoolean(id value) {
     NSString *method = [[name substringWithRange:[match rangeAtIndex:1]] uppercaseString];
     NSString *target = [name substringWithRange:[match rangeAtIndex:2]];
     if ([target hasPrefix:@"/"]) {
-        return [NSString stringWithFormat:@"%@ %@", method, [self pathWithoutIds:target]];
+        return [NSString stringWithFormat:@"%@ %@", method, [self strictPath:target]];
     }
-    return [NSString stringWithFormat:@"%@ %@", method, [self hostOf:target] ?: [self pathWithoutIds:target]];
+    return [NSString stringWithFormat:@"%@ %@", method, [self hostOf:target] ?: [self strictPath:target]];
 }
 
 // Read by hand, never with a URL parser: a parser that rejects an address ("pat<ients") must not

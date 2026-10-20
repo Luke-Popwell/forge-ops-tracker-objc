@@ -485,15 +485,17 @@ an email or a diagnosis:
 - **No SQL statement**, even with `captureSqlStatement` on; the table, view and procedure names in
   `sql_objects` are kept. No source context (this client never sends any anyway).
 - **Spans**: an outbound HTTP span's name is its method and host only (`GET api.example.com`), a span
-  named by a request path loses its ids (`GET /patients/42` becomes `GET /patients/:id`, and
-  `/patients/42` becomes `/patients/:id`), and span data keeps only `db.statement` (already masked)
+  named by a route template keeps it (any segment like `:id`, `{id}`, `<int:id>`, `[slug]` or
+  `*path`: `GET /patients/:id/notes` stays), a span named by a raw request path keeps only its first
+  segment (`GET /patients/jane-doe/12` becomes `GET /patients/:path`, and `/42/edit` becomes
+  `/:id/:path`), and span data keeps only `db.statement` (already masked)
   and `db.system`. The address is read by hand, never by a URL parser, so one a parser would reject
   still loses its path. Names that aren't addresses (`OrdersController#create`, `SELECT orders`) are
   kept.
 - **Performance samples**: a transaction name passed to `recordPerformance:durationMs:` or
   `measureTransaction:block:` is reduced the same way before it's tallied, so a route
-  (`GET /users/:id`) is kept and a raw path loses its ids; raw paths that differ only in ids share one
-  sample.
+  (`GET /users/:id`) is kept and a raw path keeps only its first segment (`GET /users/:path`); raw
+  paths under one first segment share one sample.
 - A crash report written to disk before strict privacy was turned on is reduced the same way when it
   uploads.
 

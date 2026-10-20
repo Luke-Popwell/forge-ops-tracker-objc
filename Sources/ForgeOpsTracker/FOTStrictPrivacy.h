@@ -27,23 +27,30 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSString *)messageFingerprint:(nullable NSString *)message;
 
 /**
- * A path with no query or fragment and every segment that holds an ASCII digit, or is longer than 40
- * characters, replaced by ":id": "/patients/42/notes?q=x" is "/patients/:id/notes". Empty is "/".
+ * A request or page path as strict privacy sends it, with no query or fragment. A route template
+ * (any segment that starts with ":" or "*", or is wrapped in {}, <> or []) is kept as it is:
+ * "/patients/:id/notes" stays. A raw path keeps only its first segment (":id" when that holds an
+ * ASCII digit or is longer than 40 characters), then "/:path" if there was more:
+ * "/patients/jane-doe/12" is "/patients/:path", "/42/edit" is "/:id/:path". No segments is "/".
  */
++ (NSString *)strictPath:(nullable NSString *)path;
+
+/** The name +strictPath: had before its rule changed: the same method, kept so existing code still builds. */
 + (NSString *)pathWithoutIds:(nullable NSString *)path;
 
 /**
  * An outbound call's span name with its method and host only: "GET https://api.example.com/x/42" is
- * "GET api.example.com". A target that's a path keeps it, ids stripped ("GET /orders/42" is
- * "GET /orders/:id"), and so does a name that is itself a raw path ("/orders/42" is "/orders/:id").
+ * "GET api.example.com". A target that's a path goes through +strictPath:
+ * ("GET /orders/42/items" is "GET /orders/:path", "GET /orders/:id" stays), and so does a name that
+ * is itself a path ("/orders/42" is "/orders/:path").
  * Anything else ("OrdersController#create", "SELECT orders") is returned unchanged. The address is
  * read by hand, never by a URL parser: see sdks/STRICT_PRIVACY.md's "Span names" section.
  */
 + (NSString *)spanName:(NSString *)name;
 
 /**
- * A transaction name under strict privacy: a route or controller action is kept, a raw request path
- * loses its ids, by the same rule as +spanName:. A missing or blank name is returned as it is.
+ * A transaction name under strict privacy: a route template or controller action is kept, a raw
+ * request path keeps only its first segment, by the same rule as +spanName:. A missing or blank name is returned as it is.
  */
 + (nullable id)transactionName:(nullable id)name;
 

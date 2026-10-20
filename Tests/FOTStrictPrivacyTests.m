@@ -63,11 +63,11 @@
     }
 }
 
-- (void)testEveryPathVectorLosesItsIds {
+- (void)testEveryPathVectorKeepsARouteTemplateAndOnlyARawPathsFirstSegment {
     NSArray *entries = [self vectors][@"path"];
     XCTAssertGreaterThan(entries.count, 0u);
     for (NSDictionary *entry in entries) {
-        XCTAssertEqualObjects([FOTStrictPrivacy pathWithoutIds:entry[@"path"]], entry[@"strict"], @"path %@", entry[@"path"]);
+        XCTAssertEqualObjects([FOTStrictPrivacy strictPath:entry[@"path"]], entry[@"strict"], @"path %@", entry[@"path"]);
     }
 }
 
@@ -83,10 +83,19 @@
     XCTAssertEqualObjects([FOTStrictPrivacy messageFingerprint:nil], @"e3b0c44298fc1c149afbf4c8996fb924");
 }
 
-- (void)testAPathKeepsInteriorEmptySegmentsAndDropsTrailingOnes {
-    XCTAssertEqualObjects([FOTStrictPrivacy pathWithoutIds:@"/a/"], @"/a");
-    XCTAssertEqualObjects([FOTStrictPrivacy pathWithoutIds:@"/a//b"], @"/a//b");
-    XCTAssertEqualObjects([FOTStrictPrivacy pathWithoutIds:@"?q=1"], @"/");
+- (void)testAPathReadsRouteParametersTheWayTheServerDoes {
+    XCTAssertEqualObjects([FOTStrictPrivacy strictPath:@"/a/"], @"/a");
+    XCTAssertEqualObjects([FOTStrictPrivacy strictPath:@"/a//b"], @"/a/:path");
+    XCTAssertEqualObjects([FOTStrictPrivacy strictPath:@"?q=1"], @"/");
+    XCTAssertEqualObjects([FOTStrictPrivacy strictPath:@"*"], @"*");
+    XCTAssertEqualObjects([FOTStrictPrivacy strictPath:@"/a/:"], @"/a/:path"); // a parameter needs a name
+    XCTAssertEqualObjects([FOTStrictPrivacy strictPath:@"/a/{}"], @"/a/:path");
+    XCTAssertEqualObjects([FOTStrictPrivacy strictPath:@"/a/:x\ny"], @"/a/:path"); // the server's "." never matches a newline
+}
+
+// The old name still builds and still gives the same answer.
+- (void)testPathWithoutIdsIsAnotherNameForStrictPath {
+    XCTAssertEqualObjects([FOTStrictPrivacy pathWithoutIds:@"/patients/jane-doe/12"], @"/patients/:path");
 }
 
 - (void)testASpanNameMethodIsUpcasedAndMatchedCaseInsensitively {
@@ -184,11 +193,12 @@
     XCTAssertEqualObjects(reduced, (@{ @"error_class": @"PaymentError", @"job_class": @"ChargeJob" }));
 }
 
-- (void)testATransactionNameKeepsARouteAndLosesARawPathsIds {
+- (void)testATransactionNameKeepsARouteAndOnlyARawPathsFirstSegment {
     XCTAssertEqualObjects([FOTStrictPrivacy transactionName:@"OrdersController#create"], @"OrdersController#create");
     XCTAssertEqualObjects([FOTStrictPrivacy transactionName:@"GET /users/:id"], @"GET /users/:id");
-    XCTAssertEqualObjects([FOTStrictPrivacy transactionName:@"/patients/42"], @"/patients/:id");
-    XCTAssertEqualObjects([FOTStrictPrivacy transactionName:@"GET /patients/42/notes"], @"GET /patients/:id/notes");
+    XCTAssertEqualObjects([FOTStrictPrivacy transactionName:@"/patients/42"], @"/patients/:path");
+    XCTAssertEqualObjects([FOTStrictPrivacy transactionName:@"GET /patients/42/notes"], @"GET /patients/:path");
+    XCTAssertEqualObjects([FOTStrictPrivacy transactionName:@"GET /patients/:id/notes"], @"GET /patients/:id/notes");
     XCTAssertEqualObjects([FOTStrictPrivacy transactionName:@""], @"");
     XCTAssertNil([FOTStrictPrivacy transactionName:nil]);
 }
@@ -199,8 +209,8 @@
     NSDictionary *failure = [FOTStrictPrivacy failureEvent:@{ @"error_class": @"PaymentError", @"error_message": @"x", @"transaction_name": @"/patients/42/charge" }];
 
     XCTAssertEqualObjects(route[@"transaction_name"], @"patients#show");
-    XCTAssertEqualObjects(path[@"transaction_name"], @"/patients/:id");
-    XCTAssertEqualObjects(failure, (@{ @"error_class": @"PaymentError", @"transaction_name": @"/patients/:id/charge" }));
+    XCTAssertEqualObjects(path[@"transaction_name"], @"/patients/:path");
+    XCTAssertEqualObjects(failure, (@{ @"error_class": @"PaymentError", @"transaction_name": @"/patients/:path" }));
 }
 
 - (void)testStrictPrivacyOffLeavesTheEventExactlyAsBefore {
@@ -290,7 +300,7 @@
 
     NSArray *spans = delivered[@"spans"];
     XCTAssertEqual(spans.count, 3u);
-    XCTAssertEqualObjects(spans[0][@"name"], @"GET /patients/:id/notes");
+    XCTAssertEqualObjects(spans[0][@"name"], @"GET /patients/:path");
     XCTAssertEqualObjects(spans[1][@"name"], @"GET api.example.com");
     XCTAssertNil(spans[1][@"data"]);
     XCTAssertEqualObjects(spans[2][@"name"], @"SELECT notes");
