@@ -8,6 +8,8 @@ genuine **crash reporter**: it captures what would otherwise crash the app (an u
 launch. See "Delivery model" below for why that's a deliberate design choice, not a limitation to
 work around.
 
+> For health or personal data, turn on [strict privacy](#strict-privacy): the SDK then sends only structured facts about each error (its type, stack trace, release and route), never the message, a raw path, breadcrumbs, or context you haven't allowed.
+
 ## Installation
 
 Not yet packaged for CocoaPods/Swift Package Manager: no podspec or package manifest exists yet,
