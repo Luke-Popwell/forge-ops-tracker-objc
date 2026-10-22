@@ -11,6 +11,35 @@ static NSRegularExpression *FOTRegex(NSString *pattern, NSRegularExpressionOptio
     return [NSRegularExpression regularExpressionWithPattern:pattern options:options error:nil];
 }
 
+static NSRegularExpression *FOTEmailRegex(void) {
+    static NSRegularExpression *regex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        regex = FOTRegex(@"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", 0);
+    });
+    return regex;
+}
+
+// A quoted value (KeyError: 'Jane Doe') is data, not the shape of the error. A single quote only
+// opens or closes one where no ASCII word character touches it, so "Couldn't" never does.
+static NSRegularExpression *FOTDoubleQuotedRegex(void) {
+    static NSRegularExpression *regex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        regex = FOTRegex(@"\"[^\"\\r\\n]*\"", 0);
+    });
+    return regex;
+}
+
+static NSRegularExpression *FOTSingleQuotedRegex(void) {
+    static NSRegularExpression *regex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        regex = FOTRegex(@"(?<![A-Za-z0-9_])'[^'\\r\\n]*'(?![A-Za-z0-9_])", 0);
+    });
+    return regex;
+}
+
 static NSRegularExpression *FOTHexObjectIdRegex(void) {
     static NSRegularExpression *regex;
     static dispatch_once_t once;
@@ -91,6 +120,9 @@ static BOOL FOTIsBoolean(id value) {
 
 + (NSString *)normalizedMessage:(NSString *)message {
     NSString *text = [message isKindOfClass:[NSString class]] ? message : @"";
+    text = FOTReplace(FOTEmailRegex(), text, @"<email>");
+    text = FOTReplace(FOTDoubleQuotedRegex(), text, @"<str>");
+    text = FOTReplace(FOTSingleQuotedRegex(), text, @"<str>");
     text = FOTReplace(FOTHexObjectIdRegex(), text, @"0x");
     text = FOTReplace(FOTUuidRegex(), text, @"<uuid>");
     return FOTReplace(FOTNumberRegex(), text, @"<n>");

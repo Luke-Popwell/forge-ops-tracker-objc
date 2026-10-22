@@ -17,7 +17,10 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @interface FOTStrictPrivacy : NSObject
 
-/** The message with hex object ids, UUIDs and standalone ASCII numbers replaced, in that order. */
+/**
+ * The message with emails, quoted values, hex object ids, UUIDs and standalone ASCII numbers
+ * replaced, in that order.
+ */
 + (NSString *)normalizedMessage:(nullable NSString *)message;
 
 /**
