@@ -11,6 +11,7 @@ static NSArray<NSString *> *FOTSensitiveKeys(void) {
             @"secret", @"apisecret", @"clientsecret", @"secretkey",
             @"token", @"accesstoken", @"refreshtoken", @"apikey", @"apitoken", @"authorization", @"authtoken", @"bearer", @"sessiontoken", @"csrftoken",
             @"creditcard", @"cardnumber", @"cardnum", @"cvv", @"cvv2", @"cvc",
+            @"iban", @"accountnumber", @"routingnumber", @"bankaccount",
             @"ssn", @"socialsecuritynumber", @"socialsecurity",
             @"privatekey",
         ];
@@ -53,6 +54,144 @@ static NSArray<NSArray *> *FOTPatterns(void) {
     return patterns;
 }
 
+// Card numbers in any other shape, and IBANs: see sdks/PII_SCRUBBING.md, which every SDK follows,
+// and sdks/pii_scrubbing_vectors.json (a copy is in Tests/Fixtures), which pins the results. Word
+// characters and digits are spelled out as ASCII classes: ICU's own \w, \d and \b are
+// Unicode-aware, and the rule is ASCII only.
+static NSRegularExpression *FOTCompile(NSString *pattern) {
+    NSError *error = nil;
+    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:&error];
+    NSCAssert(regex != nil, @"failed to compile PII pattern %@: %@", pattern, error);
+    return regex;
+}
+
+static NSRegularExpression *FOTDigitRun(void) {
+    static NSRegularExpression *regex;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        regex = FOTCompile(@"(?<![A-Za-z0-9_])[0-9](?:[ -]?[0-9])*(?![A-Za-z0-9_])");
+    });
+    return regex;
+}
+
+static NSRegularExpression *FOTCardPrefixes(void) {
+    static NSRegularExpression *regex;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        regex = FOTCompile(@"\\A(?:4|5[1-5]|2(?:22[1-9]|2[3-9][0-9]|[3-6][0-9][0-9]|7[01][0-9]|720)|3[47]|6011|64[4-9]|65|35(?:2[89]|[3-8][0-9])|36|30[0-5]|62)");
+    });
+    return regex;
+}
+
+static NSRegularExpression *FOTIban(void) {
+    static NSRegularExpression *regex;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        regex = FOTCompile(@"(?<![A-Za-z0-9_])[A-Z]{2}[0-9]{2}(?:[A-Z0-9]{11,30}|(?: [A-Z0-9]{4}){2,7}(?: [A-Z0-9]{1,4})?)(?![A-Za-z0-9_])");
+    });
+    return regex;
+}
+
+// Every match of regex replaced by transform of its text. Positions are NSString (UTF-16)
+// offsets throughout, the same ones NSRegularExpression reports.
+static NSString *FOTReplaceMatches(NSRegularExpression *regex, NSString *string, NSString *(^transform)(NSString *)) {
+    NSMutableString *output = [NSMutableString stringWithCapacity:string.length];
+    __block NSUInteger cursor = 0;
+    [regex enumerateMatchesInString:string options:0 range:NSMakeRange(0, string.length) usingBlock:^(NSTextCheckingResult *match, NSMatchingFlags flags, BOOL *stop) {
+        [output appendString:[string substringWithRange:NSMakeRange(cursor, match.range.location - cursor)]];
+        [output appendString:transform([string substringWithRange:match.range])];
+        cursor = NSMaxRange(match.range);
+    }];
+    [output appendString:[string substringFromIndex:cursor]];
+    return output;
+}
+
+static BOOL FOTPassesLuhn(NSString *digits) {
+    NSInteger sum = 0;
+    NSUInteger length = digits.length;
+    for (NSUInteger index = 0; index < length; index++) {
+        NSInteger value = [digits characterAtIndex:length - 1 - index] - '0';
+        if (index % 2 == 1) {
+            value *= 2;
+            if (value > 9) {
+                value -= 9;
+            }
+        }
+        sum += value;
+    }
+    return sum % 10 == 0;
+}
+
+static BOOL FOTIsCardNumber(NSString *digits) {
+    return digits.length >= 13 && digits.length <= 19
+        && [FOTCardPrefixes() firstMatchInString:digits options:0 range:NSMakeRange(0, digits.length)] != nil
+        && FOTPassesLuhn(digits);
+}
+
+// From each group of the run on, the longest stretch of whole groups that is a card number is
+// replaced, so a card followed by its CVV, two cards in a row, and Amex's 4-6-5 are all found.
+static NSString *FOTScrubCardNumbersIn(NSString *run) {
+    NSMutableArray<NSString *> *digits = [NSMutableArray array];
+    NSMutableArray<NSString *> *separators = [NSMutableArray array];
+    NSUInteger start = 0;
+    for (NSUInteger index = 0; index < run.length; index++) {
+        unichar character = [run characterAtIndex:index];
+        if (character == ' ' || character == '-') {
+            [digits addObject:[run substringWithRange:NSMakeRange(start, index - start)]];
+            [separators addObject:[run substringWithRange:NSMakeRange(index, 1)]];
+            start = index + 1;
+        }
+    }
+    [digits addObject:[run substringFromIndex:start]];
+    [separators addObject:@""];
+
+    NSMutableString *output = [NSMutableString string];
+    NSUInteger i = 0;
+    while (i < digits.count) {
+        NSInteger found = -1;
+        for (NSInteger last = (NSInteger)digits.count - 1; last >= (NSInteger)i; last -= 1) {
+            NSArray *stretch = [digits subarrayWithRange:NSMakeRange(i, (NSUInteger)last - i + 1)];
+            if (FOTIsCardNumber([stretch componentsJoinedByString:@""])) {
+                found = last;
+                break;
+            }
+        }
+        if (found >= 0) {
+            [output appendString:@"[CREDIT CARD FILTERED]"];
+            [output appendString:separators[(NSUInteger)found]];
+            i = (NSUInteger)found + 1;
+        } else {
+            [output appendString:digits[i]];
+            [output appendString:separators[i]];
+            i++;
+        }
+    }
+    return output;
+}
+
+// The IBAN check, a digit at a time: the first four characters moved to the end, letters as two
+// digits (A is 10), and the remainder by 97 is 1.
+static BOOL FOTIsIban(NSString *candidate) {
+    NSString *compact = [candidate stringByReplacingOccurrencesOfString:@" " withString:@""];
+    if (compact.length < 15 || compact.length > 34) {
+        return NO;
+    }
+
+    NSString *rearranged = [[compact substringFromIndex:4] stringByAppendingString:[compact substringToIndex:4]];
+    NSInteger remainder = 0;
+    for (NSUInteger index = 0; index < rearranged.length; index++) {
+        unichar character = [rearranged characterAtIndex:index];
+        if (character >= 'A' && character <= 'Z') {
+            NSInteger number = character - 55;
+            remainder = (remainder * 10 + number / 10) % 97;
+            remainder = (remainder * 10 + number % 10) % 97;
+        } else {
+            remainder = (remainder * 10 + (character - '0')) % 97;
+        }
+    }
+    return remainder == 1;
+}
+
 @implementation FOTPiiScrubber
 
 + (id)scrub:(id)value key:(NSString *)key {
@@ -87,7 +226,10 @@ static NSArray<NSArray *> *FOTPatterns(void) {
 }
 
 + (NSString *)scrubString:(NSString *)string {
-    NSString *result = string;
+    // IBANs first: a spaced IBAN's middle groups look like a formatted card number.
+    NSString *result = FOTReplaceMatches(FOTIban(), string, ^NSString *(NSString *candidate) {
+        return FOTIsIban(candidate) ? @"[IBAN FILTERED]" : candidate;
+    });
     for (NSArray *pair in FOTPatterns()) {
         NSString *label = pair[0];
         NSRegularExpression *regex = pair[1];
@@ -101,7 +243,9 @@ static NSArray<NSArray *> *FOTPatterns(void) {
                                                      range:NSMakeRange(0, result.length)
                                               withTemplate:template];
     }
-    return result;
+    return FOTReplaceMatches(FOTDigitRun(), result, ^NSString *(NSString *run) {
+        return FOTScrubCardNumbersIn(run);
+    });
 }
 
 + (BOOL)isSensitiveKey:(NSString *)key {

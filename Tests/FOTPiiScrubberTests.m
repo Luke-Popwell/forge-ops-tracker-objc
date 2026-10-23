@@ -6,6 +6,33 @@
 
 @implementation FOTPiiScrubberTests
 
+// A byte-identical copy of sdks/pii_scrubbing_vectors.json, found next to this file: `make test`
+// compiles it by its path relative to sdks/objc and runs from there, so __FILE__ resolves either way.
+- (NSDictionary *)vectors {
+    NSString *path = [[@(__FILE__) stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Fixtures/pii_scrubbing_vectors.json"];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    XCTAssertNotNil(data, @"missing fixture at %@", path);
+    return data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : @{};
+}
+
+- (void)testScrubsEverySharedCardNumberAndIbanVectorExactlyAsTheServerDoes {
+    NSArray *entries = [self vectors][@"strings"];
+    XCTAssertTrue(entries.count > 0);
+    for (NSDictionary *entry in entries) {
+        XCTAssertEqualObjects([FOTPiiScrubber scrubString:entry[@"input"]], entry[@"scrubbed"], @"scrubbing %@", entry[@"input"]);
+    }
+}
+
+- (void)testRedactsEverySharedBankDetailKeyVectorExactlyAsTheServerDoes {
+    NSArray *entries = [self vectors][@"keys"];
+    XCTAssertTrue(entries.count > 0);
+    for (NSDictionary *entry in entries) {
+        NSString *key = entry[@"key"];
+        NSString *expected = [entry[@"redacted"] boolValue] ? FOTRedacted : @"x";
+        XCTAssertEqualObjects([FOTPiiScrubber scrub:@{ key: @"x" } key:nil], (@{ key: expected }), @"key %@", key);
+    }
+}
+
 - (void)testRedactsAnEmailAddressEmbeddedInFreeText {
     XCTAssertEqualObjects(
         [FOTPiiScrubber scrubString:@"undefined method 'name' for user@example.com"],
